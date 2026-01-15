@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EmployeeRole {
+  ADMIN
+  MASTER
+}
+
+enum OrderStatus {
+  ACCEPTED
+  IN_PROGRESS
+  READY
+  DONE
+}
+
+enum ServiceType {
+  TIRE_MOUNTING
+  STRAIGHTENING
+  WELDING
+  BALANCING
+  SIDE_REPAIR
+  INSPECTION
+  PUNCTURE
+  PAINTING
+  OTHER
+}
+
+model Employee {
+  id        String       @id @default(cuid())
+  tgId      BigInt       @unique
+  name      String?
+  role      EmployeeRole
+  isActive  Boolean      @default(true)
+
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  acceptedOrders Order[] @relation("AcceptedBy")
+  createdOrders  Order[] @relation("CreatedBy")
+
+  @@index([role, isActive])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  publicId      Int         @unique @default(autoincrement())
+  status        OrderStatus @default(ACCEPTED)
+
+  clientPhone   String
+  acceptedById  String
+  createdById   String
+
+  estimateTotal Int?
+  finalTotal    Int?
+
+  photoFileId   String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  doneAt        DateTime?
+
+  acceptedBy Employee @relation("AcceptedBy", fields: [acceptedById], references: [id])
+  createdBy  Employee @relation("CreatedBy", fields: [createdById], references: [id])
+
+  items OrderItem[]
+
+  @@index([clientPhone])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id            String      @id @default(cuid())
+  orderId       String
+
+  service       ServiceType
+  comment       String?
+  price         Int
+
+  warrantyDays  Int?
+  warrantyUntil DateTime?
+
+  createdAt     DateTime @default(now())
+
+  order         Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([service])
+}

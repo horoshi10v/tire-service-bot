@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tirebot-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tirebot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    container_name: tirebot-app
+    env_file: .env
+    depends_on:
+      - db
+    restart: unless-stopped
+
+volumes:
+  pgdata:
