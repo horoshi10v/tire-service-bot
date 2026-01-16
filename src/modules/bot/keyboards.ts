@@ -25,13 +25,16 @@ export function servicesKeyboard(
 ): InlineKeyboardMarkup {
     const rows = Object.keys(SERVICE_LABELS).map((k) => {
         const service = k as ServiceType;
-        const label = SERVICE_LABELS[service];
         const mark = selected.includes(service) ? '✅ ' : '';
-        return [{ text: `${mark}${label}`, callback_data: `svc:${service}` }];
+        return [
+            {
+                text: `${mark}${SERVICE_LABELS[service]}`,
+                callback_data: `svc:${service}`,
+            },
+        ];
     });
 
     rows.push([{ text: '✅ Готово', callback_data: 'svc:done' }]);
-
     return { inline_keyboard: rows };
 }
 
@@ -60,4 +63,16 @@ export function statusKeyboard(publicId: number): InlineKeyboardMarkup {
             ],
         ],
     };
+}
+
+export function staffKeyboard(
+    staff: { tgId: bigint; name: string }[]
+): InlineKeyboardMarkup {
+    const rows = staff.map((s) => [
+        { text: s.name, callback_data: `staff:${s.tgId}` },
+    ]);
+
+    rows.push([{ text: '✍️ Ввести вручную', callback_data: 'staff:manual' }]);
+
+    return { inline_keyboard: rows };
 }

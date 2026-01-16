@@ -3,33 +3,19 @@ import type { Context } from 'telegraf';
 import { AuthService } from '../auth/auth.service';
 import { OrdersService } from '../orders/orders.service';
 import { BotSessionData } from './bot.session';
-import {
-    servicesKeyboard,
-    statusKeyboard,
-    SERVICE_LABELS,
-    STATUS_LABELS,
-} from './keyboards';
+import { servicesKeyboard, SERVICE_LABELS, statusKeyboard } from './keyboards';
 import { OrderStatus, ServiceType } from '@prisma/client';
+import {
+    ensureSession,
+    formatOrderShort,
+    isPhoneLike,
+    notifyAllAdmins,
+    parseIntStrict,
+    sendOrderCard,
+} from './bot.helpers';
+import { handleCreateOrderFlow } from './create-order.flow';
 
 type BotContext = Context & { session: BotSessionData };
-
-function ensureSession(ctx: BotContext) {
-    if (!ctx.session) (ctx as any).session = { flow: null };
-    if (!ctx.session.services) ctx.session.services = [];
-    if (!ctx.session.items) ctx.session.items = [];
-    return ctx.session;
-}
-
-function isPhoneLike(s: string) {
-    const t = s.replace(/[^\d+]/g, '');
-    return t.length >= 7;
-}
-
-function parseIntStrict(s: string): number | null {
-    const n = Number(String(s).trim());
-    if (!Number.isFinite(n)) return null;
-    return Math.trunc(n);
-}
 
 @Update()
 export class BotUpdate {
@@ -37,34 +23,6 @@ export class BotUpdate {
         private auth: AuthService,
         private orders: OrdersService
     ) {}
-
-    // ---------- helpers ----------
-    private async notifyAllAdmins(ctx: BotContext, text: string) {
-        const adminTgIds = await this.auth.getActiveAdminTgIds();
-        await Promise.all(
-            adminTgIds.map((id) =>
-                ctx.telegram.sendMessage(Number(id), text).catch(() => null)
-            )
-        );
-    }
-
-    private formatOrderShort(order: any) {
-        const itemsText = (order.items || [])
-            .map(
-                (it: any) =>
-                    `• ${SERVICE_LABELS[it.service]} — ${it.price}${it.comment ? ` (${it.comment})` : ''}${it.warrantyDays ? `, гарантия ${it.warrantyDays}д` : ''}`
-            )
-            .join('\n');
-
-        return (
-            `#${order.publicId} ${STATUS_LABELS[order.status]}\n` +
-            `📞 ${order.clientPhone}\n` +
-            `👤 Принял: ${order.acceptedBy?.name || '—'}\n` +
-            `🧾 Услуги:\n${itemsText || '—'}\n` +
-            `💰 Ориентир: ${order.estimateTotal ?? '—'}\n` +
-            `💵 Итог: ${order.finalTotal ?? '—'}`
-        );
-    }
 
     // ---------- commands ----------
     @Start()
@@ -97,24 +55,19 @@ export class BotUpdate {
 
         const parts = String((ctx.message as any)?.text || '').split(/\s+/);
         const id = Number(parts[1]);
-        if (!id) return ctx.reply('Формат: /active 123');
+        if (!id) {
+            await ctx.reply('Формат: /active 123');
+            return;
+        }
 
         const order = await this.orders.getByPublicId(id);
-        if (order.status === OrderStatus.DONE) {
-            await ctx.reply(this.formatOrderShort(order));
-        } else {
-            await ctx.reply(this.formatOrderShort(order), {
-                reply_markup: statusKeyboard(order.publicId),
-            });
-        }
+        await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
     }
 
     // ---------- photo: start create flow ----------
     @On('photo')
     async onPhoto(@Ctx() ctx: BotContext) {
-        const s = ensureSession(ctx);
         const tgId = BigInt(ctx.from!.id);
-
         const allowed =
             (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId));
         if (!allowed) return;
@@ -140,12 +93,7 @@ export class BotUpdate {
     @Action(/^svc:/)
     async onServiceToggle(@Ctx() ctx: BotContext) {
         const s = ensureSession(ctx);
-        if (s.flow !== 'create') return ctx.answerCbQuery();
-
-        const tgId = BigInt(ctx.from!.id);
-        const allowed =
-            (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId));
-        if (!allowed) return ctx.answerCbQuery();
+        if (s.flow !== 'create') return;
 
         const data = String((ctx.callbackQuery as any).data);
         const arg = data.split(':')[1];
@@ -158,9 +106,10 @@ export class BotUpdate {
             s.step = 'servicePrice';
             s.pendingService = s.services[0];
             await ctx.answerCbQuery();
-            return ctx.reply(
+            await ctx.reply(
                 `💰 Цена за "${SERVICE_LABELS[s.pendingService]}":`
             );
+            return;
         }
 
         const service = arg as ServiceType;
@@ -170,7 +119,7 @@ export class BotUpdate {
         else s.services.push(service);
 
         await ctx.answerCbQuery();
-        return ctx.editMessageReplyMarkup(servicesKeyboard(s.services));
+        await ctx.editMessageReplyMarkup(servicesKeyboard(s.services));
     }
 
     // ---------- status change ----------
@@ -194,9 +143,10 @@ export class BotUpdate {
             s.step = 'finalTotal';
             s.finalizePublicId = publicId;
             await ctx.answerCbQuery();
-            return ctx.reply(
+            await ctx.reply(
                 `💵 Введите итоговую сумму для заказа #${publicId}:`
             );
+            return;
         }
 
         const updated = await this.orders.changeStatus({
@@ -206,17 +156,10 @@ export class BotUpdate {
         });
 
         await ctx.answerCbQuery('Ок');
-
-        if (status === OrderStatus.READY) {
-            await this.notifyAllAdmins(ctx, `🟢 Заказ #${publicId} готов`);
-        }
-
-        return ctx.reply(this.formatOrderShort(updated), {
-            reply_markup: statusKeyboard(publicId),
-        });
+        await sendOrderCard(ctx, updated, true);
     }
 
-    // ---------- text handler: steps ----------
+    // ---------- text handler ----------
     @On('text')
     async onText(@Ctx() ctx: BotContext) {
         const s = ensureSession(ctx);
@@ -243,7 +186,7 @@ export class BotUpdate {
             if (!list.length) return ctx.reply('Ничего не найдено (Active).');
 
             for (const o of list) {
-                await ctx.reply(this.formatOrderShort(o), {
+                await ctx.reply(formatOrderShort(o), {
                     reply_markup: statusKeyboard(o.publicId),
                 });
             }
@@ -251,142 +194,34 @@ export class BotUpdate {
         }
 
         // ---- finalize flow ----
-        if (
-            s.flow === 'finalize' &&
-            s.step === 'finalTotal' &&
-            s.finalizePublicId
-        ) {
+        if (s.flow === 'finalize' && s.step === 'finalTotal') {
             const finalTotal = parseIntStrict(text);
-            if (!finalTotal || finalTotal <= 0)
-                return ctx.reply('Введите число > 0');
+            if (!finalTotal || finalTotal <= 0) {
+                await ctx.reply('Введите число > 0');
+                return;
+            }
 
             const order = await this.orders.finalizeOrder({
-                orderPublicId: s.finalizePublicId,
+                orderPublicId: s.finalizePublicId!,
                 byTgId: tgId,
                 finalTotal,
             });
-
-            await this.notifyAllAdmins(
+            const adminTgIds = await this.auth.getActiveAdminTgIds();
+            await notifyAllAdmins(
                 ctx,
+                adminTgIds,
                 `⚫ Заказ #${order.publicId} выдан. Итог: ${order.finalTotal}`
             );
 
-            // reset
             ctx.session = { flow: null };
-            return ctx.reply(this.formatOrderShort(order));
+            await sendOrderCard(ctx, order, false);
+            return;
         }
 
         // ---- create flow ----
         if (s.flow === 'create') {
-            if (s.step === 'phone') {
-                if (!isPhoneLike(text))
-                    return ctx.reply(
-                        'Введите корректный номер (минимум 7 цифр)'
-                    );
-                s.phone = text;
-                s.step = 'acceptedByName';
-                return ctx.reply('👤 Кто принял заказ? (имя):');
-            }
-
-            if (s.step === 'acceptedByName') {
-                s.acceptedByName = text;
-                s.step = 'services';
-                return ctx.reply('🧾 Выберите услуги:', {
-                    reply_markup: servicesKeyboard(s.services ?? []),
-                });
-            }
-
-            // дальше идёт пошаговый ввод позиций по выбранным услугам:
-            if (s.step === 'servicePrice' && s.pendingService) {
-                const price = parseIntStrict(text);
-                if (price === null || price < 0)
-                    return ctx.reply('Цена должна быть числом (>= 0)');
-
-                s.items ??= [];
-                s.items.push({ service: s.pendingService, price });
-
-                // следующий шаг: комментарий
-                s.step = 'serviceComment';
-                return ctx.reply(
-                    `📝 Комментарий к "${SERVICE_LABELS[s.pendingService]}"? (или "-" чтобы пропустить)`
-                );
-            }
-
-            if (s.step === 'serviceComment' && s.items?.length) {
-                const last = s.items[s.items.length - 1];
-                last.comment = text === '-' ? null : text;
-
-                s.step = 'serviceWarranty';
-                return ctx.reply(
-                    `🛡 Гарантия (дней) для "${SERVICE_LABELS[last.service]}"? (0 или "-" если нет)`
-                );
-            }
-
-            if (s.step === 'serviceWarranty' && s.items?.length) {
-                const last = s.items[s.items.length - 1];
-                const wd = text === '-' ? 0 : parseIntStrict(text);
-                if (wd === null || wd < 0)
-                    return ctx.reply('Введите число дней (>=0) или "-"');
-
-                last.warrantyDays = wd > 0 ? wd : null;
-
-                // берем следующую услугу
-                const already = new Set(s.items.map((i) => i.service));
-                const next = (s.services ?? []).find((x) => !already.has(x));
-
-                if (next) {
-                    s.pendingService = next;
-                    s.step = 'servicePrice';
-                    return ctx.reply(`💰 Цена за "${SERVICE_LABELS[next]}":`);
-                }
-
-                // все услуги пройдены — спрашиваем ориентир (можно авто)
-                s.step = 'estimateTotal';
-                const sum = s.items.reduce((a, i) => a + (i.price || 0), 0);
-                return ctx.reply(
-                    `💰 Ориентировочная сумма? (нажми Enter число) или "-" чтобы оставить авто = ${sum}`
-                );
-            }
-
-            if (s.step === 'estimateTotal') {
-                let estimateTotal: number | null = null;
-                if (text !== '-') {
-                    const n = parseIntStrict(text);
-                    if (n === null || n < 0)
-                        return ctx.reply('Введите число (>=0) или "-"');
-                    estimateTotal = n;
-                }
-
-                // ensure acceptedBy exists in DB: мы храним в Order acceptedById (Employee),
-                // но здесь у нас только имя. В MVP делаем acceptedBy = createdBy (tgId),
-                // а имя сохраняем в Employee.name через Staff sync.
-                // Поэтому acceptedByTgId = tgId.
-                const created = await this.orders.createOrder({
-                    clientPhone: s.phone!,
-                    photoFileId: s.photoFileId ?? null,
-                    acceptedByTgId: tgId,
-                    createdByTgId: tgId,
-                    items: (s.items ?? []).map((i) => ({
-                        service: i.service,
-                        price: i.price,
-                        comment: i.comment ?? null,
-                        warrantyDays: i.warrantyDays ?? null,
-                    })),
-                    estimateTotal,
-                });
-
-                await this.notifyAllAdmins(
-                    ctx,
-                    `🆕 Новый заказ #${created.publicId}\n📞 ${created.clientPhone}\n🧾 ${(created.items || []).map((it) => SERVICE_LABELS[it.service]).join(', ')}`
-                );
-
-                // reset
-                ctx.session = { flow: null };
-
-                return ctx.reply(this.formatOrderShort(created), {
-                    reply_markup: statusKeyboard(created.publicId),
-                });
-            }
+            await handleCreateOrderFlow(ctx, this.auth, this.orders);
+            return;
         }
     }
 }
