@@ -1,4 +1,4 @@
-import { InlineKeyboardMarkup } from 'telegraf/types';
+import { InlineKeyboardMarkup, ReplyKeyboardMarkup } from 'telegraf/types';
 import { OrderStatus, ServiceType } from '@prisma/client';
 
 export const SERVICE_LABELS: Record<ServiceType, string> = {
@@ -19,6 +19,21 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
     READY: '🟢 Готов',
     DONE: '⚫ Выдан',
 };
+
+/** Нижнее меню (кнопки снизу в чате) */
+export function mainMenuKeyboard(): ReplyKeyboardMarkup {
+    return {
+        resize_keyboard: true,
+        one_time_keyboard: false,
+        is_persistent: true,
+        keyboard: [
+            ['🆕 Новый', '🔍 Поиск'],
+            ['🟡 Принятые', '🔵 В работе'],
+            ['🟢 Готовые', '⚫ Выданные'],
+            ['📌 Открыть заказ', '📊 Сводка'],
+        ],
+    };
+}
 
 export function servicesKeyboard(
     selected: ServiceType[]

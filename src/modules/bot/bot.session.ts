@@ -10,6 +10,7 @@ export interface BotSessionData {
     photoFileId?: string;
     phone?: string;
     acceptedByName?: string;
+    acceptedByTgId?: bigint;
     services?: ServiceType[];
     items?: Array<{
         service: ServiceType;

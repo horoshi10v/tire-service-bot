@@ -1,8 +1,9 @@
-import { Context } from 'telegraf';
+import type { Context } from 'telegraf';
+import { BotSessionData } from './bot.session';
 import { OrderStatus } from '@prisma/client';
 import { SERVICE_LABELS, STATUS_LABELS, statusKeyboard } from './keyboards';
 
-export type BotContext = Context & { session: any };
+export type BotContext = Context & { session: BotSessionData };
 
 export function ensureSession(ctx: BotContext) {
     if (!ctx.session) (ctx as any).session = { flow: null };
@@ -22,47 +23,55 @@ export function parseIntStrict(s: string): number | null {
     return Math.trunc(n);
 }
 
+/** Уведомление админам: обязательно с фото, если оно есть */
 export async function notifyAllAdmins(
     ctx: BotContext,
-    adminIds: bigint[],
+    adminTgIds: Array<string | number | bigint>,
     order: any,
-    withPhoto = false
+    prefixText?: string
 ) {
-    const text = formatOrderShort(order);
+    const text =
+        (prefixText ? `${prefixText}\n\n` : '') + formatOrderShort(order);
 
     await Promise.all(
-        adminIds.map(async (id) => {
+        adminTgIds.map(async (id) => {
+            const chatId = Number(id);
+
             try {
-                if (withPhoto && order.photoFileId) {
-                    await ctx.telegram.sendPhoto(
-                        Number(id),
-                        order.photoFileId,
-                        {
-                            caption: text,
-                        }
-                    );
+                if (order.photoFileId) {
+                    await ctx.telegram.sendPhoto(chatId, order.photoFileId, {
+                        caption: text,
+                    });
                 } else {
-                    await ctx.telegram.sendMessage(Number(id), text);
+                    await ctx.telegram.sendMessage(chatId, text);
                 }
-            } catch {}
+            } catch {
+                // ignore
+            }
         })
     );
 }
 
+function formatMaster(order: any): string {
+    const name = order.acceptedBy?.name || '—';
+    const username = order.acceptedBy?.username; // может отсутствовать в модели
+    return username ? `${name} (@${String(username).replace(/^@/, '')})` : name;
+}
+
 export function formatOrderShort(order: any) {
     const itemsText = (order.items || [])
-        .map(
-            (it: any) =>
-                `• ${SERVICE_LABELS[it.service]} — ${it.price}` +
-                (it.comment ? ` (${it.comment})` : '') +
-                (it.warrantyDays ? `, гарантия ${it.warrantyDays}д` : '')
-        )
+        .map((it: any) => {
+            const label = SERVICE_LABELS[it.service] ?? String(it.service);
+            const w = it.warrantyDays ? `, гарантия ${it.warrantyDays}д` : '';
+            const c = it.comment ? ` (${it.comment})` : '';
+            return `• ${label} — ${it.price}${c}${w}`;
+        })
         .join('\n');
 
     return (
         `#${order.publicId} ${STATUS_LABELS[order.status]}\n` +
         `📞 ${order.clientPhone}\n` +
-        `👤 Принял: ${order.acceptedBy?.name || '—'}\n` +
+        `👤 Принял: ${formatMaster(order)}\n` +
         `🧾 Услуги:\n${itemsText || '—'}\n` +
         `💰 Ориентир: ${order.estimateTotal ?? '—'}\n` +
         `💵 Итог: ${order.finalTotal ?? '—'}`

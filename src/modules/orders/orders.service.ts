@@ -278,4 +278,50 @@ export class OrdersService {
             orderBy: { createdAt: 'desc' },
         });
     }
+
+    async listByStatus(input: {
+        status: OrderStatus;
+        page: number;
+        pageSize: number;
+    }) {
+        const { status, page, pageSize } = input;
+
+        const [items, total] = await this.prisma.$transaction([
+            this.prisma.order.findMany({
+                where: { status },
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * pageSize,
+                take: pageSize,
+                include: {
+                    items: true,
+                    acceptedBy: { select: { name: true, tgId: true } },
+                },
+            }),
+            this.prisma.order.count({
+                where: { status },
+            }),
+        ]);
+
+        return { items, total };
+    }
+
+    async countByStatus() {
+        const result = await this.prisma.order.groupBy({
+            by: ['status'],
+            _count: { _all: true },
+        });
+
+        const map: Record<OrderStatus, number> = {
+            ACCEPTED: 0,
+            IN_PROGRESS: 0,
+            READY: 0,
+            DONE: 0,
+        };
+
+        for (const row of result) {
+            map[row.status] = row._count._all;
+        }
+
+        return map;
+    }
 }

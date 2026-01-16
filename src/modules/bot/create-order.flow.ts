@@ -19,6 +19,10 @@ export async function handleCreateOrderFlow(
     const text = String((ctx.message as any)?.text || '').trim();
     const tgId = BigInt(ctx.from!.id);
 
+    // гарантируем массивы
+    s.items ??= [];
+    s.services ??= [];
+
     if (s.step === 'phone') {
         if (!isPhoneLike(text)) {
             await ctx.reply('Введите корректный номер (минимум 7 цифр)');
@@ -44,7 +48,7 @@ export async function handleCreateOrderFlow(
         s.step = 'services';
 
         await ctx.reply('🧾 Выберите услуги:', {
-            reply_markup: servicesKeyboard(s.services ?? []),
+            reply_markup: servicesKeyboard(s.services),
         });
         return;
     }
@@ -87,7 +91,8 @@ export async function handleCreateOrderFlow(
         last.warrantyDays = wd || null;
 
         const next = s.services.find(
-            (x: ServiceType) => !s.items.some((i) => i.service === x)
+            (x: ServiceType) =>
+                !(s.items?.some((i) => i.service === x) ?? false)
         );
 
         if (next) {
@@ -118,7 +123,7 @@ export async function handleCreateOrderFlow(
         const created = await orders.createOrder({
             clientPhone: s.phone!,
             photoFileId: s.photoFileId!,
-            acceptedByTgId: s.acceptedByTgId!, // ВАЖНО
+            acceptedByTgId: s.acceptedByTgId!, // выбранный мастер
             createdByTgId: tgId,
             items: s.items.map((i) => ({
                 service: i.service,
@@ -130,7 +135,7 @@ export async function handleCreateOrderFlow(
         });
 
         const adminIds = await auth.getActiveAdminTgIds();
-        await notifyAllAdmins(ctx, adminIds, created, true); // с фото
+        await notifyAllAdmins(ctx, adminIds, created, '🆕 Новый заказ');
 
         ctx.session = { flow: null };
         await sendOrderCard(ctx, created, true);
