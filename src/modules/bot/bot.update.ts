@@ -150,6 +150,8 @@ export class BotUpdate {
             status,
         });
 
+        const adminIds = await this.auth.getActiveAdminTgIds();
+        await notifyAllAdmins(ctx, adminIds, updated, true);
         await ctx.answerCbQuery('Ок');
         await sendOrderCard(ctx, updated, true);
     }
