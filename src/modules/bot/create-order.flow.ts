@@ -1,7 +1,7 @@
 import { OrdersService } from '../orders/orders.service';
 import { AuthService } from '../auth/auth.service';
 import { ServiceType } from '@prisma/client';
-import { servicesKeyboard, SERVICE_LABELS } from './keyboards';
+import { servicesKeyboard, SERVICE_LABELS, staffKeyboard } from './keyboards';
 import {
     BotContext,
     isPhoneLike,
@@ -25,14 +25,24 @@ export async function handleCreateOrderFlow(
             return;
         }
         s.phone = text;
-        s.step = 'acceptedByName';
-        await ctx.reply('👤 Кто принял заказ? (имя):');
+        s.step = 'acceptedBySelect';
+
+        const staff = (await auth.getActiveStaff()).map((s) => ({
+            tgId: s.tgId,
+            name: s.name || 'Без имени',
+        }));
+
+        await ctx.reply('👤 Кто принял заказ?', {
+            reply_markup: staffKeyboard(staff),
+        });
         return;
     }
 
-    if (s.step === 'acceptedByName') {
+    if (s.step === 'acceptedByManual') {
         s.acceptedByName = text;
+        s.acceptedByTgId = tgId;
         s.step = 'services';
+
         await ctx.reply('🧾 Выберите услуги:', {
             reply_markup: servicesKeyboard(s.services ?? []),
         });
@@ -48,6 +58,7 @@ export async function handleCreateOrderFlow(
 
         s.items.push({ service: s.pendingService, price });
         s.step = 'serviceComment';
+
         await ctx.reply(
             `📝 Комментарий к "${SERVICE_LABELS[s.pendingService]}"? (или "-")`
         );
@@ -55,9 +66,10 @@ export async function handleCreateOrderFlow(
     }
 
     if (s.step === 'serviceComment') {
-        const last = s.items.at(-1);
+        const last = s.items.at(-1)!;
         last.comment = text === '-' ? null : text;
         s.step = 'serviceWarranty';
+
         await ctx.reply(
             `🛡 Гарантия (дней) для "${SERVICE_LABELS[last.service]}"? (0 или "-")`
         );
@@ -65,7 +77,7 @@ export async function handleCreateOrderFlow(
     }
 
     if (s.step === 'serviceWarranty') {
-        const last = s.items.at(-1);
+        const last = s.items.at(-1)!;
         const wd = text === '-' ? 0 : parseIntStrict(text);
         if (wd === null || wd < 0) {
             await ctx.reply('Введите число дней или "-"');
@@ -87,6 +99,7 @@ export async function handleCreateOrderFlow(
 
         const sum = s.items.reduce((a, i) => a + i.price, 0);
         s.step = 'estimateTotal';
+
         await ctx.reply(`💰 Ориентировочная сумма? (число или "-" = ${sum})`);
         return;
     }
@@ -103,9 +116,9 @@ export async function handleCreateOrderFlow(
         }
 
         const created = await orders.createOrder({
-            clientPhone: s.phone,
-            photoFileId: s.photoFileId,
-            acceptedByTgId: tgId,
+            clientPhone: s.phone!,
+            photoFileId: s.photoFileId!,
+            acceptedByTgId: s.acceptedByTgId!, // ВАЖНО
             createdByTgId: tgId,
             items: s.items.map((i) => ({
                 service: i.service,
@@ -116,12 +129,8 @@ export async function handleCreateOrderFlow(
             estimateTotal: estimate,
         });
 
-        const adminTgIds = await auth.getActiveAdminTgIds();
-        await notifyAllAdmins(
-            ctx,
-            adminTgIds,
-            `🆕 Новый заказ #${created.publicId}\n📞 ${created.clientPhone}\n🧾 ${created.items.map((i) => SERVICE_LABELS[i.service]).join(', ')}`
-        );
+        const adminIds = await auth.getActiveAdminTgIds();
+        await notifyAllAdmins(ctx, adminIds, created, true); // с фото
 
         ctx.session = { flow: null };
         await sendOrderCard(ctx, created, true);

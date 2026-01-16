@@ -3,12 +3,10 @@ import type { Context } from 'telegraf';
 import { AuthService } from '../auth/auth.service';
 import { OrdersService } from '../orders/orders.service';
 import { BotSessionData } from './bot.session';
-import { servicesKeyboard, SERVICE_LABELS, statusKeyboard } from './keyboards';
+import { servicesKeyboard, SERVICE_LABELS, staffKeyboard } from './keyboards';
 import { OrderStatus, ServiceType } from '@prisma/client';
 import {
     ensureSession,
-    formatOrderShort,
-    isPhoneLike,
     notifyAllAdmins,
     parseIntStrict,
     sendOrderCard,
@@ -33,32 +31,29 @@ export class BotUpdate {
             '🚗 Tire Service Bot\n\n' +
                 '📸 Отправь фото — начнём новый заказ\n' +
                 '🔎 /search — поиск по телефону\n' +
+                '👨‍🔧 /by_master — фильтр по мастеру\n' +
                 '📌 /active <id> — открыть заказ по номеру\n\n' +
                 'Доступ: роль ADMIN/MASTER задаётся в Google Sheet (лист Staff).'
         );
     }
 
-    @Command('search')
-    async search(@Ctx() ctx: BotContext) {
-        const s = ensureSession(ctx);
-        s.flow = 'search';
-        s.step = 'phonePart';
-        await ctx.reply('Введите номер телефона (или часть):');
+    @Command('by_master')
+    async byMaster(@Ctx() ctx: BotContext) {
+        const staff = (await this.auth.getActiveStaff()).map((s) => ({
+            tgId: s.tgId,
+            name: s.name || 'Без имени',
+        }));
+
+        await ctx.reply('Выберите мастера:', {
+            reply_markup: staffKeyboard(staff),
+        });
     }
 
     @Command('active')
     async openOrder(@Ctx() ctx: BotContext) {
-        const tgId = BigInt(ctx.from!.id);
-        const allowed =
-            (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId));
-        if (!allowed) return;
-
         const parts = String((ctx.message as any)?.text || '').split(/\s+/);
         const id = Number(parts[1]);
-        if (!id) {
-            await ctx.reply('Формат: /active 123');
-            return;
-        }
+        if (!id) return ctx.reply('Формат: /active 123');
 
         const order = await this.orders.getByPublicId(id);
         await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
@@ -67,17 +62,9 @@ export class BotUpdate {
     // ---------- photo: start create flow ----------
     @On('photo')
     async onPhoto(@Ctx() ctx: BotContext) {
-        const tgId = BigInt(ctx.from!.id);
-        const allowed =
-            (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId));
-        if (!allowed) return;
-
-        const fileId = (ctx.message as any).photo?.at(-1)?.file_id as
-            | string
-            | undefined;
+        const fileId = (ctx.message as any).photo?.at(-1)?.file_id;
         if (!fileId) return;
 
-        // reset flow
         ctx.session = {
             flow: 'create',
             step: 'phone',
@@ -99,59 +86,67 @@ export class BotUpdate {
         const arg = data.split(':')[1];
 
         if (arg === 'done') {
-            if (!s.services?.length) {
-                await ctx.answerCbQuery('Выберите хотя бы одну услугу');
-                return;
-            }
             s.step = 'servicePrice';
-            s.pendingService = s.services[0];
+            s.pendingService = s.services![0];
             await ctx.answerCbQuery();
-            await ctx.reply(
+            return ctx.reply(
                 `💰 Цена за "${SERVICE_LABELS[s.pendingService]}":`
             );
-            return;
         }
 
         const service = arg as ServiceType;
         s.services ??= [];
-        if (s.services.includes(service))
-            s.services = s.services.filter((x) => x !== service);
-        else s.services.push(service);
+        s.services.includes(service)
+            ? (s.services = s.services.filter((x) => x !== service))
+            : s.services.push(service);
 
         await ctx.answerCbQuery();
         await ctx.editMessageReplyMarkup(servicesKeyboard(s.services));
     }
 
+    // ---------- staff selection ----------
+    @Action(/^staff:/)
+    async onStaffSelect(@Ctx() ctx: BotContext) {
+        const s = ensureSession(ctx);
+        const data = String((ctx.callbackQuery as any).data);
+        const id = data.split(':')[1];
+
+        if (id === 'manual') {
+            s.step = 'acceptedByManual';
+            await ctx.answerCbQuery();
+            return ctx.reply('Введите имя мастера:');
+        }
+
+        s.acceptedByTgId = BigInt(id);
+        s.step = 'services';
+
+        await ctx.answerCbQuery();
+        await ctx.reply('🧾 Выберите услуги:', {
+            reply_markup: servicesKeyboard(s.services ?? []),
+        });
+    }
+
     // ---------- status change ----------
     @Action(/^st:/)
     async onStatus(@Ctx() ctx: BotContext) {
-        const tgId = BigInt(ctx.from!.id);
-        const allowed =
-            (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId));
-        if (!allowed) return ctx.answerCbQuery();
-
         const data = String((ctx.callbackQuery as any).data);
         const [, publicIdStr, statusStr] = data.split(':');
         const publicId = Number(publicIdStr);
         const status = statusStr as OrderStatus;
-
-        if (!publicId) return ctx.answerCbQuery();
 
         if (status === OrderStatus.DONE) {
             const s = ensureSession(ctx);
             s.flow = 'finalize';
             s.step = 'finalTotal';
             s.finalizePublicId = publicId;
-            await ctx.answerCbQuery();
-            await ctx.reply(
+            return ctx.reply(
                 `💵 Введите итоговую сумму для заказа #${publicId}:`
             );
-            return;
         }
 
         const updated = await this.orders.changeStatus({
             orderPublicId: publicId,
-            byTgId: tgId,
+            byTgId: BigInt(ctx.from!.id),
             status,
         });
 
@@ -164,58 +159,23 @@ export class BotUpdate {
     async onText(@Ctx() ctx: BotContext) {
         const s = ensureSession(ctx);
         const text = String((ctx.message as any).text || '').trim();
-        const tgId = BigInt(ctx.from!.id);
-
-        const allowed =
-            (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId));
-        if (!allowed) {
-            // не отвечаем пользователям без прав, чтобы не спамить
-            return;
-        }
-
-        // ---- search flow ----
-        if (s.flow === 'search' && s.step === 'phonePart') {
-            s.flow = null;
-            s.step = undefined;
-
-            const list = await this.orders.searchByPhone({
-                phonePart: text,
-                includeDone: false,
-                limit: 20,
-            });
-            if (!list.length) return ctx.reply('Ничего не найдено (Active).');
-
-            for (const o of list) {
-                await ctx.reply(formatOrderShort(o), {
-                    reply_markup: statusKeyboard(o.publicId),
-                });
-            }
-            return;
-        }
 
         // ---- finalize flow ----
-        if (s.flow === 'finalize' && s.step === 'finalTotal') {
+        if (s.flow === 'finalize') {
             const finalTotal = parseIntStrict(text);
-            if (!finalTotal || finalTotal <= 0) {
-                await ctx.reply('Введите число > 0');
-                return;
-            }
+            if (!finalTotal) return ctx.reply('Введите корректную сумму');
 
             const order = await this.orders.finalizeOrder({
                 orderPublicId: s.finalizePublicId!,
-                byTgId: tgId,
+                byTgId: BigInt(ctx.from!.id),
                 finalTotal,
             });
-            const adminTgIds = await this.auth.getActiveAdminTgIds();
-            await notifyAllAdmins(
-                ctx,
-                adminTgIds,
-                `⚫ Заказ #${order.publicId} выдан. Итог: ${order.finalTotal}`
-            );
 
-            ctx.session = { flow: null };
-            await sendOrderCard(ctx, order, false);
-            return;
+            const adminIds = await this.auth.getActiveAdminTgIds();
+            await notifyAllAdmins(ctx, adminIds, order, true); // с фото
+
+            s.flow = null;
+            return sendOrderCard(ctx, order, false);
         }
 
         // ---- create flow ----

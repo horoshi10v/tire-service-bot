@@ -29,4 +29,19 @@ export class AuthService {
         });
         return admins.map((a) => a.tgId);
     }
+
+    async getActiveStaff(): Promise<{ tgId: bigint; name: string }[]> {
+        const staff = await this.prisma.employee.findMany({
+            where: { isActive: true },
+            select: { tgId: true, name: true },
+            orderBy: { name: 'asc' },
+        });
+
+        return staff
+            .filter((s) => !!s.name)
+            .map((s) => ({
+                tgId: s.tgId,
+                name: s.name!,
+            }));
+    }
 }

@@ -24,13 +24,28 @@ export function parseIntStrict(s: string): number | null {
 
 export async function notifyAllAdmins(
     ctx: BotContext,
-    adminTgIds: bigint[],
-    text: string
+    adminIds: bigint[],
+    order: any,
+    withPhoto = false
 ) {
+    const text = formatOrderShort(order);
+
     await Promise.all(
-        adminTgIds.map((id) =>
-            ctx.telegram.sendMessage(Number(id), text).catch(() => null)
-        )
+        adminIds.map(async (id) => {
+            try {
+                if (withPhoto && order.photoFileId) {
+                    await ctx.telegram.sendPhoto(
+                        Number(id),
+                        order.photoFileId,
+                        {
+                            caption: text,
+                        }
+                    );
+                } else {
+                    await ctx.telegram.sendMessage(Number(id), text);
+                }
+            } catch {}
+        })
     );
 }
 

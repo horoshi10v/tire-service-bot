@@ -263,4 +263,19 @@ export class OrdersService {
         if (!order) throw new NotFoundException('Order not found');
         return order;
     }
+
+    async getByMaster(tgId: bigint) {
+        return this.prisma.order.findMany({
+            where: {
+                acceptedBy: { tgId },
+                status: { not: OrderStatus.DONE },
+            },
+            include: {
+                items: true,
+                acceptedBy: true,
+                createdBy: true,
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
 }
