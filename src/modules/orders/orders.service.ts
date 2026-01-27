@@ -13,6 +13,8 @@ import {
     FinalizeOrderInput,
     SearchOrdersInput,
 } from './orders.types';
+import { WarrantyPdfService } from '../pdf/warranty-pdf.service';
+import { MailService } from '../mail/mail.service';
 
 const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
     ACCEPTED: ['IN_PROGRESS', 'READY', 'DONE'],
@@ -25,19 +27,20 @@ function normalizePhone(p: string) {
     return p.replace(/[^\d+]/g, '').trim();
 }
 
-function calcWarrantyUntil(
-    base: Date,
-    warrantyDays?: number | null
-): Date | null {
-    if (!warrantyDays || warrantyDays <= 0) return null;
+function calcWarrantyUntil(base: Date, days?: number | null): Date | null {
+    if (!days || days <= 0) return null;
     const d = new Date(base);
-    d.setDate(d.getDate() + warrantyDays);
+    d.setDate(d.getDate() + days);
     return d;
 }
 
 @Injectable()
 export class OrdersService {
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private warrantyPdf: WarrantyPdfService,
+        private mail: MailService
+    ) {}
 
     /**
      * Permissions:
@@ -54,6 +57,7 @@ export class OrdersService {
             throw new ForbiddenException('User is not active');
         if (!roles.includes(emp.role))
             throw new ForbiddenException('Not enough permissions');
+
         return emp;
     }
 
@@ -71,54 +75,40 @@ export class OrdersService {
         if (!clientPhone)
             throw new BadRequestException('clientPhone is required');
         if (!input.items?.length)
-            throw new BadRequestException(
-                'At least one service item is required'
-            );
-
-        const sumItems = input.items.reduce(
-            (s, it) => s + Number(it.price || 0),
-            0
-        );
-        const estimateTotal = input.estimateTotal ?? (sumItems || null);
+            throw new BadRequestException('At least one service is required');
 
         const now = new Date();
 
-        const data: Prisma.OrderCreateInput = {
-            clientPhone,
-            status: OrderStatus.ACCEPTED,
-            estimateTotal: estimateTotal ?? null,
-            finalTotal: null,
-            photoFileId: input.photoFileId ?? null,
-
-            acceptedBy: { connect: { id: acceptedBy.id } },
-            createdBy: { connect: { id: createdBy.id } },
-
-            items: {
-                create: input.items.map((it) => ({
-                    service: it.service,
-                    price: Math.trunc(it.price),
-                    comment: it.comment ?? null,
-                    warrantyDays: it.warrantyDays ?? null,
-                    warrantyUntil: calcWarrantyUntil(
-                        now,
-                        it.warrantyDays ?? null
-                    ),
-                })),
-            },
-        };
-
         return this.prisma.order.create({
-            data,
+            data: {
+                clientPhone,
+                status: OrderStatus.ACCEPTED,
+                estimateTotal: input.estimateTotal ?? null,
+                photoFileId: input.photoFileId ?? null,
+
+                acceptedBy: { connect: { id: acceptedBy.id } },
+                createdBy: { connect: { id: createdBy.id } },
+
+                items: {
+                    create: input.items.map((i) => ({
+                        service: i.service,
+                        price: Math.trunc(i.price),
+                        comment: i.comment ?? null,
+                        warrantyDays: i.warrantyDays ?? null,
+                        warrantyUntil: calcWarrantyUntil(now, i.warrantyDays),
+                    })),
+                },
+            },
             include: {
-                acceptedBy: { select: { tgId: true, name: true, role: true } },
-                createdBy: { select: { tgId: true, name: true, role: true } },
                 items: true,
+                acceptedBy: { select: { name: true, tgId: true } },
+                createdBy: { select: { name: true, tgId: true } },
             },
         });
     }
 
     async addItems(input: AddItemsInput) {
-        const by = await this.requireRole(input.byTgId, [
+        await this.requireRole(input.byTgId, [
             EmployeeRole.MASTER,
             EmployeeRole.ADMIN,
         ]);
@@ -128,55 +118,54 @@ export class OrdersService {
             select: { id: true, status: true },
         });
         if (!order) throw new NotFoundException('Order not found');
-
-        // после READY можно запретить добавление позиций (настроим правило)
         if (order.status === OrderStatus.DONE)
             throw new BadRequestException('Order already DONE');
-
-        if (!input.items?.length)
-            throw new BadRequestException('No items provided');
 
         const now = new Date();
 
         await this.prisma.orderItem.createMany({
-            data: input.items.map((it) => ({
+            data: input.items.map((i) => ({
                 orderId: order.id,
-                service: it.service,
-                price: Math.trunc(it.price),
-                comment: it.comment ?? null,
-                warrantyDays: it.warrantyDays ?? null,
-                warrantyUntil: calcWarrantyUntil(now, it.warrantyDays ?? null),
+                service: i.service,
+                price: Math.trunc(i.price),
+                comment: i.comment ?? null,
+                warrantyDays: i.warrantyDays ?? null,
+                warrantyUntil: calcWarrantyUntil(now, i.warrantyDays),
             })),
-            skipDuplicates: true, // если вдруг одинаковые позиции создадутся повторно (при ретраях)
         });
 
-        // обновим estimateTotal = sum(items)
-        const agg = await this.prisma.orderItem.aggregate({
+        const sum = await this.prisma.orderItem.aggregate({
             where: { orderId: order.id },
             _sum: { price: true },
         });
 
         return this.prisma.order.update({
             where: { id: order.id },
-            data: { estimateTotal: agg._sum.price ?? null },
+            data: { estimateTotal: sum._sum.price ?? null },
             include: { items: true },
         });
     }
 
     async changeStatus(input: ChangeStatusInput) {
-        await this.requireRole(input.byTgId, [
+        const by = await this.requireRole(input.byTgId, [
             EmployeeRole.MASTER,
             EmployeeRole.ADMIN,
         ]);
 
         const order = await this.prisma.order.findUnique({
             where: { publicId: input.orderPublicId },
-            select: { id: true, status: true, publicId: true },
+            select: {
+                id: true,
+                status: true,
+                assignedToId: true,
+            },
         });
+
         if (!order) throw new NotFoundException('Order not found');
 
-        if (order.status === OrderStatus.DONE)
+        if (order.status === OrderStatus.DONE) {
             throw new BadRequestException('Order already DONE');
+        }
 
         const allowed = STATUS_FLOW[order.status] || [];
         if (!allowed.includes(input.status)) {
@@ -185,65 +174,97 @@ export class OrdersService {
             );
         }
 
-        // DONE делаем только через finalizeOrder (чтобы всегда была сумма)
         if (input.status === OrderStatus.DONE) {
-            throw new BadRequestException(
-                'Use finalizeOrder to set DONE with finalTotal'
+            throw new BadRequestException('Use finalizeOrder to set DONE');
+        }
+
+        const ops: Prisma.PrismaPromise<any>[] = [];
+
+        // Автоперехват заказа, если работает другой мастер
+        if (order.assignedToId !== by.id) {
+            ops.push(
+                this.prisma.order.update({
+                    where: { id: order.id },
+                    data: { assignedToId: by.id },
+                }),
+                this.prisma.orderTransfer.create({
+                    data: {
+                        orderId: order.id,
+                        fromId: order.assignedToId,
+                        toId: by.id,
+                        byId: by.id,
+                    },
+                })
             );
         }
 
-        return this.prisma.order.update({
+        // Обновление статуса
+        ops.push(
+            this.prisma.order.update({
+                where: { id: order.id },
+                data: { status: input.status },
+            })
+        );
+
+        await this.prisma.$transaction(ops);
+
+        return this.prisma.order.findUnique({
             where: { id: order.id },
-            data: { status: input.status },
-            include: { items: true },
+            include: {
+                items: true,
+                acceptedBy: { select: { name: true, tgId: true } },
+                assignedTo: { select: { name: true, tgId: true } },
+            },
         });
     }
 
     async finalizeOrder(input: FinalizeOrderInput) {
-        await this.requireRole(input.byTgId, [
-            EmployeeRole.MASTER,
-            EmployeeRole.ADMIN,
-        ]);
-
-        const order = await this.prisma.order.findUnique({
+        const order = await this.prisma.order.update({
             where: { publicId: input.orderPublicId },
-            select: { id: true, status: true },
-        });
-        if (!order) throw new NotFoundException('Order not found');
-
-        if (order.status === OrderStatus.DONE)
-            throw new BadRequestException('Order already DONE');
-        if (!input.finalTotal || input.finalTotal <= 0)
-            throw new BadRequestException('finalTotal must be > 0');
-
-        const doneAt = input.doneAt ?? new Date();
-
-        return this.prisma.order.update({
-            where: { id: order.id },
             data: {
                 status: OrderStatus.DONE,
                 finalTotal: Math.trunc(input.finalTotal),
-                doneAt,
+                doneAt: input.doneAt ?? new Date(),
+                clientEmail: input.clientEmail ?? null,
             },
-            include: { items: true },
+            include: {
+                items: true,
+                acceptedBy: true,
+                assignedTo: true,
+            },
         });
+
+        // 1. Генерируем PDF
+        const pdfBytes = await this.warrantyPdf.generate(order);
+        const pdfBuffer = Buffer.from(pdfBytes);
+
+        // 2. Отправляем email
+        if (order.clientEmail) {
+            await this.mail.sendPdf(
+                order.clientEmail,
+                `Гарантія на замовлення #${order.publicId}`,
+                `Вітаємо!\n\nУ вкладенні — гарантійний талон на виконані роботи.`,
+                pdfBuffer,
+                `warranty-${order.publicId}.pdf`
+            );
+        }
+
+        return order;
     }
 
     async searchByPhone(input: SearchOrdersInput) {
-        const phonePart = normalizePhone(input.phonePart);
-        if (!phonePart) throw new BadRequestException('phonePart is required');
-
-        const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
+        const phone = normalizePhone(input.phonePart);
+        if (!phone) throw new BadRequestException('phonePart is required');
 
         return this.prisma.order.findMany({
             where: {
-                clientPhone: { contains: phonePart },
+                clientPhone: { contains: phone },
                 ...(input.includeDone
                     ? {}
                     : { status: { not: OrderStatus.DONE } }),
             },
             orderBy: { createdAt: 'desc' },
-            take: limit,
+            take: Math.min(input.limit ?? 20, 50),
             include: {
                 items: true,
                 acceptedBy: { select: { name: true, tgId: true } },
@@ -256,27 +277,12 @@ export class OrdersService {
             where: { publicId },
             include: {
                 items: true,
-                acceptedBy: { select: { name: true, tgId: true, role: true } },
-                createdBy: { select: { name: true, tgId: true, role: true } },
+                acceptedBy: { select: { name: true, tgId: true } },
+                createdBy: { select: { name: true, tgId: true } },
             },
         });
         if (!order) throw new NotFoundException('Order not found');
         return order;
-    }
-
-    async getByMaster(tgId: bigint) {
-        return this.prisma.order.findMany({
-            where: {
-                acceptedBy: { tgId },
-                status: { not: OrderStatus.DONE },
-            },
-            include: {
-                items: true,
-                acceptedBy: true,
-                createdBy: true,
-            },
-            orderBy: { createdAt: 'desc' },
-        });
     }
 
     async listByStatus(input: {
@@ -297,9 +303,7 @@ export class OrdersService {
                     acceptedBy: { select: { name: true, tgId: true } },
                 },
             }),
-            this.prisma.order.count({
-                where: { status },
-            }),
+            this.prisma.order.count({ where: { status } }),
         ]);
 
         return { items, total };
@@ -318,8 +322,8 @@ export class OrdersService {
             DONE: 0,
         };
 
-        for (const row of result) {
-            map[row.status] = row._count._all;
+        for (const r of result) {
+            map[r.status] = r._count._all;
         }
 
         return map;

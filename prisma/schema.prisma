@@ -42,8 +42,13 @@ model Employee {
 
   acceptedOrders Order[] @relation("AcceptedBy")
   createdOrders  Order[] @relation("CreatedBy")
+  assignedOrders Order[] @relation("AssignedTo")
+
+  transfersFrom  OrderTransfer[] @relation("TransferFrom")
+  transfersTo    OrderTransfer[] @relation("TransferTo")
 
   @@index([role, isActive])
+  orderTransfers OrderTransfer[]
 }
 
 model Order {
@@ -52,8 +57,11 @@ model Order {
   status        OrderStatus @default(ACCEPTED)
 
   clientPhone   String
+  clientEmail   String?
+
   acceptedById  String
   createdById   String
+  assignedToId  String?
 
   estimateTotal Int?
   finalTotal    Int?
@@ -66,11 +74,14 @@ model Order {
 
   acceptedBy Employee @relation("AcceptedBy", fields: [acceptedById], references: [id])
   createdBy  Employee @relation("CreatedBy", fields: [createdById], references: [id])
+  assignedTo Employee? @relation("AssignedTo", fields: [assignedToId], references: [id])
 
-  items OrderItem[]
+  items     OrderItem[]
+  transfers OrderTransfer[]
 
   @@index([clientPhone])
   @@index([status, createdAt])
+  @@index([assignedToId])
 }
 
 model OrderItem {
@@ -90,4 +101,25 @@ model OrderItem {
 
   @@index([orderId])
   @@index([service])
+}
+
+model OrderTransfer {
+  id        String   @id @default(cuid())
+
+  orderId   String
+  fromId    String?
+  toId      String
+  byId      String
+
+  createdAt DateTime @default(now())
+
+  order Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  from  Employee? @relation("TransferFrom", fields: [fromId], references: [id])
+  to    Employee  @relation("TransferTo",   fields: [toId],   references: [id])
+  by    Employee  @relation(fields: [byId],  references: [id])
+
+  @@index([orderId])
+  @@index([fromId])
+  @@index([toId])
 }

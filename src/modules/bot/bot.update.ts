@@ -67,13 +67,13 @@ export class BotUpdate {
         });
     }
 
-    // ---------- commands ----------
-    @Start()
+    // ---------- start ----------
     @Start()
     async start(@Ctx() ctx: BotContext) {
         ensureSession(ctx);
         if (!(await this.requireAllowed(ctx))) return;
 
+        // обновляем меню (убираем возможные старые кнопки)
         await ctx.reply('🔄 Обновляю меню…', {
             reply_markup: { remove_keyboard: true },
         });
@@ -88,8 +88,11 @@ export class BotUpdate {
         );
     }
 
+    // ---------- commands ----------
     @Command('active')
     async openOrder(@Ctx() ctx: BotContext) {
+        if (!(await this.requireAllowed(ctx))) return;
+
         try {
             const parts = String((ctx.message as any)?.text || '').split(/\s+/);
             const id = Number(parts[1]);
@@ -97,12 +100,13 @@ export class BotUpdate {
 
             const order = await this.orders.getByPublicId(id);
             await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
-        } catch (e) {
+        } catch (e: any) {
             if (e?.status === 404) {
                 await ctx.reply('❌ Заказ с таким номером не найден');
-            } else {
-                throw e;
+                return;
             }
+            console.error('openOrder error', e);
+            await ctx.reply('🚨 Ошибка. Попробуйте позже.');
         }
     }
 
@@ -155,8 +159,13 @@ export class BotUpdate {
         await ctx.reply('Введите номер телефона (или часть):');
     }
 
+    // ✅ Теперь это реально работает: ожидаем ввод id в следующем сообщении
     @Hears('📌 Открыть заказ')
     async openOrderHint(@Ctx() ctx: BotContext) {
+        if (!(await this.requireAllowed(ctx))) return;
+        const s = ensureSession(ctx);
+        s.flow = null;
+        s.step = 'openPublicId';
         await ctx.reply('Введите номер заказа, например: 1234');
     }
 
@@ -183,13 +192,16 @@ export class BotUpdate {
             | undefined;
         if (!fileId) return;
 
-        ctx.session = {
-            flow: 'create',
-            step: 'phone',
-            photoFileId: fileId,
-            services: [],
-            items: [],
-        };
+        ctx.session = ensureSession(ctx);
+        ctx.session.flow = 'create';
+        ctx.session.step = 'phone';
+        ctx.session.photoFileId = fileId;
+        ctx.session.phone = undefined;
+        ctx.session.acceptedByName = undefined;
+        ctx.session.acceptedByTgId = undefined;
+        ctx.session.services = [];
+        ctx.session.items = [];
+        ctx.session.pendingService = undefined;
 
         await ctx.reply('📞 Введите телефон клиента:');
     }
@@ -218,13 +230,23 @@ export class BotUpdate {
     async openFromList(@Ctx() ctx: BotContext) {
         if (!(await this.requireAllowed(ctx))) return ctx.answerCbQuery();
 
-        const data = String((ctx.callbackQuery as any).data);
-        const id = Number(data.split(':')[1]);
-        if (!id) return ctx.answerCbQuery();
+        try {
+            const data = String((ctx.callbackQuery as any).data);
+            const id = Number(data.split(':')[1]);
+            if (!id) return ctx.answerCbQuery();
 
-        const order = await this.orders.getByPublicId(id);
-        await ctx.answerCbQuery();
-        await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
+            const order = await this.orders.getByPublicId(id);
+            await ctx.answerCbQuery();
+            await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
+        } catch (e: any) {
+            await ctx.answerCbQuery();
+            if (e?.status === 404) {
+                await ctx.reply('❌ Заказ не найден');
+                return;
+            }
+            console.error('openFromList error', e);
+            await ctx.reply('🚨 Ошибка. Попробуйте позже.');
+        }
     }
 
     // ---------- services selection ----------
@@ -242,7 +264,7 @@ export class BotUpdate {
                 return;
             }
             s.step = 'servicePrice';
-            s.pendingService = s.services![0];
+            s.pendingService = s.services[0];
             await ctx.answerCbQuery();
             return ctx.reply(
                 `💰 Цена за "${SERVICE_LABELS[s.pendingService]}":`
@@ -250,10 +272,12 @@ export class BotUpdate {
         }
 
         const service = arg as ServiceType;
-        s.services ??= [];
-        s.services.includes(service)
-            ? (s.services = s.services.filter((x) => x !== service))
-            : s.services.push(service);
+
+        if (s.services.includes(service)) {
+            s.services = s.services.filter((x) => x !== service);
+        } else {
+            s.services.push(service);
+        }
 
         await ctx.answerCbQuery();
         await ctx.editMessageReplyMarkup(servicesKeyboard(s.services));
@@ -314,6 +338,12 @@ export class BotUpdate {
                 status,
             });
 
+            if (!updated) {
+                await ctx.answerCbQuery();
+                await ctx.reply('❌ Заказ не найден');
+                return;
+            }
+
             await ctx.answerCbQuery('Ок');
             await sendOrderCard(ctx, updated, true);
 
@@ -328,7 +358,6 @@ export class BotUpdate {
             await ctx.answerCbQuery();
 
             if (e?.status === 400) {
-                // бизнес-ошибка перехода статуса
                 await ctx.reply(
                     `⚠️ Нельзя сменить статус:\n${e.response?.message}`
                 );
@@ -353,6 +382,32 @@ export class BotUpdate {
 
         if (!(await this.requireAllowed(ctx))) return;
 
+        // 1) обработка "📌 Открыть заказ" (ввод id)
+        if (s.step === 'openPublicId') {
+            s.step = undefined;
+
+            const id = Number(text);
+            if (!id) return ctx.reply('Введите число, например: 1234');
+
+            try {
+                const order = await this.orders.getByPublicId(id);
+                await sendOrderCard(
+                    ctx,
+                    order,
+                    order.status !== OrderStatus.DONE
+                );
+            } catch (e: any) {
+                if (e?.status === 404) {
+                    await ctx.reply('❌ Заказ с таким номером не найден');
+                    return;
+                }
+                console.error('openPublicId error', e);
+                await ctx.reply('🚨 Ошибка. Попробуйте позже.');
+            }
+            return;
+        }
+
+        // 2) search flow
         if (s.flow === 'search' && s.step === 'phonePart') {
             try {
                 s.flow = null;
@@ -370,43 +425,69 @@ export class BotUpdate {
                     await sendOrderCard(ctx, o, o.status !== OrderStatus.DONE);
                 }
             } catch (e: any) {
-                if (e?.status === 404) {
-                    await ctx.reply('❌ Заказы не найдены');
-                    return;
-                }
-
                 console.error('Search error', e);
                 await ctx.reply('🚨 Ошибка поиска');
             }
             return;
         }
 
-        // finalize flow
+        // 3) finalize flow
         if (s.flow === 'finalize') {
-            const finalTotal = parseIntStrict(text);
-            if (!finalTotal || finalTotal <= 0)
-                return ctx.reply('Введите корректную сумму');
+            // Шаг 1 — ввод суммы
+            if (s.step === 'finalTotal') {
+                const finalTotal = parseIntStrict(text);
+                if (!finalTotal || finalTotal <= 0) {
+                    return ctx.reply('Введите корректную сумму');
+                }
 
-            const order = await this.orders.finalizeOrder({
-                orderPublicId: s.finalizePublicId!,
-                byTgId: BigInt(ctx.from!.id),
-                finalTotal,
-            });
+                s.finalTotal = finalTotal;
+                s.step = 'clientEmail';
+                return ctx.reply(
+                    '📧 Введите email клиента для отправки гарантийного талона (или "-" если без email):'
+                );
+            }
 
-            const adminIds = await this.auth.getActiveAdminTgIds();
-            await notifyAllAdmins(
-                ctx,
-                adminIds,
-                order,
-                `⚫ Заказ выдан: #${order.publicId}`
-            );
+            // Шаг 2 — ввод email
+            if (s.step === 'clientEmail') {
+                let email: string | null = null;
 
-            s.flow = null;
-            await sendOrderCard(ctx, order, false);
-            return;
+                if (text !== '-') {
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+                        return ctx.reply('Введите корректный email или "-"');
+                    }
+                    email = text;
+                }
+
+                try {
+                    const order = await this.orders.finalizeOrder({
+                        orderPublicId: s.finalizePublicId!,
+                        byTgId: BigInt(ctx.from!.id),
+                        finalTotal: s.finalTotal!,
+                        clientEmail: email,
+                    });
+
+                    const adminIds = await this.auth.getActiveAdminTgIds();
+                    await notifyAllAdmins(
+                        ctx,
+                        adminIds,
+                        order,
+                        `⚫ Заказ выдан: #${order.publicId}`
+                    );
+
+                    s.flow = null;
+                    s.step = undefined;
+                    s.clientEmail = undefined;
+
+                    await sendOrderCard(ctx, order, false);
+                } catch (e) {
+                    console.error('finalize error', e);
+                    await ctx.reply('🚨 Ошибка при выдаче заказа');
+                }
+                return;
+            }
         }
 
-        // create flow
+        // 4) create flow
         if (s.flow === 'create') {
             await handleCreateOrderFlow(ctx, this.auth, this.orders);
             return;

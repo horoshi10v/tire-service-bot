@@ -34,12 +34,13 @@ export type ChangeStatusInput = {
 export type FinalizeOrderInput = {
     orderPublicId: number;
     byTgId: bigint;
-    finalTotal: number; // обязательна
+    finalTotal: number;
+    clientEmail?: string | null;
     doneAt?: Date;
 };
 
 export type SearchOrdersInput = {
     phonePart: string;
-    includeDone?: boolean; // по умолчанию false
+    includeDone?: boolean;
     limit?: number;
 };

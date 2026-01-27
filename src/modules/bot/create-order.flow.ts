@@ -9,6 +9,7 @@ import {
     parseIntStrict,
     sendOrderCard,
 } from './bot.helpers';
+import { DEFAULT_SESSION } from './bot.session';
 
 export async function handleCreateOrderFlow(
     ctx: BotContext,
@@ -137,7 +138,7 @@ export async function handleCreateOrderFlow(
         const adminIds = await auth.getActiveAdminTgIds();
         await notifyAllAdmins(ctx, adminIds, created, '🆕 Новый заказ');
 
-        ctx.session = { flow: null };
+        ctx.session = { ...DEFAULT_SESSION };
         await sendOrderCard(ctx, created, true);
     }
 }

@@ -7,6 +7,8 @@ import { SheetsModule } from './modules/integrations/sheets/sheets.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { BotModule } from './modules/bot/bot.module';
+import { MailModule } from './modules/mail/mail.module';
+import { PdfModule } from './modules/pdf/pdf.module';
 
 @Module({
     imports: [
@@ -20,6 +22,8 @@ import { BotModule } from './modules/bot/bot.module';
         AuthModule,
         OrdersModule,
         BotModule,
+        MailModule,
+        PdfModule,
     ],
 })
 export class AppModule {}

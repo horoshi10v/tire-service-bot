@@ -1,14 +1,15 @@
 import type { Context } from 'telegraf';
-import { BotSessionData } from './bot.session';
+import { BotSessionData, DEFAULT_SESSION } from './bot.session';
 import { OrderStatus } from '@prisma/client';
 import { SERVICE_LABELS, STATUS_LABELS, statusKeyboard } from './keyboards';
 
 export type BotContext = Context & { session: BotSessionData };
 
 export function ensureSession(ctx: BotContext) {
-    if (!ctx.session) (ctx as any).session = { flow: null };
+    if (!ctx.session) (ctx as any).session = { ...DEFAULT_SESSION };
     if (!ctx.session.services) ctx.session.services = [];
     if (!ctx.session.items) ctx.session.items = [];
+    if (typeof ctx.session.flow === 'undefined') ctx.session.flow = null;
     return ctx.session;
 }
 
