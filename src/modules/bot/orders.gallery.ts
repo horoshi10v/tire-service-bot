@@ -51,7 +51,7 @@ export function ordersListKeyboard(
 
     if (page > 1) {
         navRow.push({
-            text: '⬅ Пред',
+            text: '⬅ Поперед',
             callback_data: `page:${status}:${page - 1}`,
         });
     }
@@ -60,7 +60,7 @@ export function ordersListKeyboard(
 
     if (page < totalPages) {
         navRow.push({
-            text: 'След ➡',
+            text: 'Наст ➡',
             callback_data: `page:${status}:${page + 1}`,
         });
     }

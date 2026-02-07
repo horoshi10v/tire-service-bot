@@ -25,6 +25,9 @@ import {
 } from './bot.helpers';
 import { handleCreateOrderFlow } from './create-order.flow';
 import { ordersListKeyboard, statusListTitle } from './orders.gallery';
+import { Roles, UserRole } from '../../common/guards';
+import { WarrantyVerificationService } from '../warranty';
+import { WarrantyVerificationHandler } from './handlers';
 
 type BotContext = Context & { session: BotSessionData };
 
@@ -34,15 +37,10 @@ const PAGE_SIZE = 10;
 export class BotUpdate {
     constructor(
         private auth: AuthService,
-        private orders: OrdersService
+        private orders: OrdersService,
+        private warranty: WarrantyVerificationService,
+        private warrantyHandler: WarrantyVerificationHandler
     ) {}
-
-    private async requireAllowed(ctx: BotContext): Promise<boolean> {
-        const tgId = BigInt(ctx.from!.id);
-        return (
-            (await this.auth.isAdmin(tgId)) || (await this.auth.isMaster(tgId))
-        );
-    }
 
     private async showStatusList(
         ctx: BotContext,
@@ -71,122 +69,169 @@ export class BotUpdate {
     @Start()
     async start(@Ctx() ctx: BotContext) {
         ensureSession(ctx);
-        if (!(await this.requireAllowed(ctx))) return;
 
-        // обновляем меню (убираем возможные старые кнопки)
-        await ctx.reply('🔄 Обновляю меню…', {
+        const text = String((ctx.message as any)?.text || '');
+
+        // Check if this is a warranty verification command
+        const verificationData = this.warranty.parseVerificationCommand(text);
+        if (verificationData) {
+            return this.warrantyHandler.handle(ctx, verificationData);
+        }
+
+        // Regular start command - check user role
+        const tgId = BigInt(ctx.from!.id);
+        const isEmployee = await this.auth.isActiveEmployee(tgId);
+
+        if (isEmployee) {
+            return this.startEmployee(ctx);
+        } else {
+            return this.startRegularUser(ctx);
+        }
+    }
+
+    private async startEmployee(@Ctx() ctx: BotContext) {
+        await ctx.reply('🔄 Оновлюю меню…', {
             reply_markup: { remove_keyboard: true },
         });
 
         await ctx.reply(
-            '🚗 Tire Service Bot\n\n' +
-                '📸 Отправь фото — начнём новый заказ\n' +
-                '🔎 /search — поиск по телефону\n' +
-                '📌 /active <id> — открыть заказ\n\n' +
-                'Или используй меню ниже 👇',
+            '🚗 Бот шиномонтажу\n\n' +
+                '📸 Надішліть фото — створити замовлення\n' +
+                '🔎 /search — пошук за телефоном\n' +
+                '📌 /active <id> — відкрити замовлення\n\n' +
+                'Або скористайтеся меню нижче 👇',
             { reply_markup: mainMenuKeyboard() }
+        );
+    }
+
+    private async startRegularUser(@Ctx() ctx: BotContext) {
+        await ctx.reply(
+            '👋 Вітаємо у боті шиномонтажу!\n\n' +
+                '🔍 Для перевірки гарантії відскануйте QR-код з вашого гарантійного талона.\n\n' +
+                '📋 Для перевірки статусу замовлення використовуйте меню нижче 👇',
+            {
+                reply_markup: {
+                    resize_keyboard: true,
+                    one_time_keyboard: false,
+                    is_persistent: true,
+                    keyboard: [['📋 Статус замовлення']],
+                },
+            }
         );
     }
 
     // ---------- commands ----------
     @Command('active')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async openOrder(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
-
         try {
             const parts = String((ctx.message as any)?.text || '').split(/\s+/);
             const id = Number(parts[1]);
-            if (!id) return ctx.reply('Формат: /active 123');
+            if (!id) {
+                await ctx.reply('Формат: /active 123');
+                return;
+            }
 
             const order = await this.orders.getByPublicId(id);
             await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
         } catch (e: any) {
             if (e?.status === 404) {
-                await ctx.reply('❌ Заказ с таким номером не найден');
+                await ctx.reply('❌ Замовлення з таким номером не знайдено');
                 return;
             }
             console.error('openOrder error', e);
-            await ctx.reply('🚨 Ошибка. Попробуйте позже.');
+            await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
         }
     }
 
     @Command('search')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async search(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         const s = ensureSession(ctx);
         s.flow = 'search';
         s.step = 'phonePart';
-        await ctx.reply('Введите номер телефона (или часть):');
+        await ctx.reply('Введіть номер телефону (або частину):');
+    }
+
+    // ===== USER MENU HANDLERS =====
+
+    @Hears('📋 Статус замовлення')
+    async checkOrderStatus(@Ctx() ctx: BotContext) {
+        const s = ensureSession(ctx);
+        s.flow = 'checkStatus';
+        s.step = 'waitingForOrderId';
+        await ctx.reply('📋 Введіть номер замовлення, наприклад: 1234');
     }
 
     // ---------- bottom menu hears ----------
-    @Hears('🟡 Принятые')
+    @Hears('🟡 Прийняті')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async listAccepted(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         await this.showStatusList(ctx, OrderStatus.ACCEPTED, 1);
     }
 
-    @Hears('🔵 В работе')
+    @Hears('🔵 В роботі')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async listInProgress(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         await this.showStatusList(ctx, OrderStatus.IN_PROGRESS, 1);
     }
 
-    @Hears('🟢 Готовые')
+    @Hears('🟢 Готові')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async listReady(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         await this.showStatusList(ctx, OrderStatus.READY, 1);
     }
 
-    @Hears('⚫ Выданные')
+    @Hears('⚫ Видані')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async listDone(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         await this.showStatusList(ctx, OrderStatus.DONE, 1);
     }
 
-    @Hears('🆕 Новый')
+    @Hears('🆕 Новий')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async hintNew(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
-        await ctx.reply('Отправь фото колеса/заказа 📸 — начнём создание.');
+        await ctx.reply(
+            'Надішліть фото колеса/замовлення 📸 — почнемо створення.'
+        );
     }
 
-    @Hears('🔍 Поиск')
+    @Hears('🔍 Пошук')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async hintSearch(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         const s = ensureSession(ctx);
         s.flow = 'search';
         s.step = 'phonePart';
-        await ctx.reply('Введите номер телефона (или часть):');
+        await ctx.reply('Введіть номер телефону (або частину):');
     }
 
-    // ✅ Теперь это реально работает: ожидаем ввод id в следующем сообщении
-    @Hears('📌 Открыть заказ')
+    @Hears('📌 Відкрити замовлення')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async openOrderHint(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
         const s = ensureSession(ctx);
         s.flow = null;
         s.step = 'openPublicId';
-        await ctx.reply('Введите номер заказа, например: 1234');
+        await ctx.reply('Введіть номер замовлення, наприклад: 1234');
     }
 
     @Hears('📊 Сводка')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async summary(@Ctx() ctx: BotContext) {
         const stats = await this.orders.countByStatus();
 
         await ctx.reply(
-            `📊 Сводка заказов:\n\n` +
-                `🟡 Принятые: ${stats.ACCEPTED}\n` +
-                `🔵 В работе: ${stats.IN_PROGRESS}\n` +
-                `🟢 Готовые: ${stats.READY}\n` +
-                `⚫ Выданные: ${stats.DONE}`
+            `📊 Зведення замовлень:\n\n` +
+                `🟡 Прийняті: ${stats.ACCEPTED}\n` +
+                `🔵 В роботі: ${stats.IN_PROGRESS}\n` +
+                `🟢 Готові: ${stats.READY}\n` +
+                `⚫ Видані: ${stats.DONE}`
         );
     }
 
     // ---------- photo: start create flow ----------
     @On('photo')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async onPhoto(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return;
-
         const fileId = (ctx.message as any).photo?.at(-1)?.file_id as
             | string
             | undefined;
@@ -203,14 +248,13 @@ export class BotUpdate {
         ctx.session.items = [];
         ctx.session.pendingService = undefined;
 
-        await ctx.reply('📞 Введите телефон клиента:');
+        await ctx.reply('📞 Введіть телефон клієнта:');
     }
 
     // ---------- pagination ----------
     @Action(/^page:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async onPage(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return ctx.answerCbQuery();
-
         const data = String((ctx.callbackQuery as any).data);
         const [, statusStr, pageStr] = data.split(':');
         const status = statusStr as OrderStatus;
@@ -227,9 +271,8 @@ export class BotUpdate {
 
     // ---------- open order from list ----------
     @Action(/^open:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async openFromList(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return ctx.answerCbQuery();
-
         try {
             const data = String((ctx.callbackQuery as any).data);
             const id = Number(data.split(':')[1]);
@@ -241,16 +284,17 @@ export class BotUpdate {
         } catch (e: any) {
             await ctx.answerCbQuery();
             if (e?.status === 404) {
-                await ctx.reply('❌ Заказ не найден');
+                await ctx.reply('❌ Замовлення не знайдено');
                 return;
             }
             console.error('openFromList error', e);
-            await ctx.reply('🚨 Ошибка. Попробуйте позже.');
+            await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
         }
     }
 
     // ---------- services selection ----------
     @Action(/^svc:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async onServiceToggle(@Ctx() ctx: BotContext) {
         const s = ensureSession(ctx);
         if (s.flow !== 'create') return;
@@ -260,15 +304,16 @@ export class BotUpdate {
 
         if (arg === 'done') {
             if (!s.services?.length) {
-                await ctx.answerCbQuery('Выберите хотя бы одну услугу');
+                await ctx.answerCbQuery('Виберіть хоча б одну послугу');
                 return;
             }
             s.step = 'servicePrice';
             s.pendingService = s.services[0];
             await ctx.answerCbQuery();
-            return ctx.reply(
-                `💰 Цена за "${SERVICE_LABELS[s.pendingService]}":`
+            await ctx.reply(
+                `💰 Ціна за "${SERVICE_LABELS[s.pendingService]}":`
             );
+            return;
         }
 
         const service = arg as ServiceType;
@@ -285,6 +330,7 @@ export class BotUpdate {
 
     // ---------- staff selection ----------
     @Action(/^staff:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async onStaffSelect(@Ctx() ctx: BotContext) {
         const s = ensureSession(ctx);
         if (s.flow !== 'create') return;
@@ -295,23 +341,23 @@ export class BotUpdate {
         if (id === 'manual') {
             s.step = 'acceptedByManual';
             await ctx.answerCbQuery();
-            return ctx.reply('Введите имя мастера:');
+            await ctx.reply("Введіть ім'я майстра:");
+            return;
         }
 
         s.acceptedByTgId = BigInt(id);
         s.step = 'services';
 
         await ctx.answerCbQuery();
-        await ctx.reply('🧾 Выберите услуги:', {
+        await ctx.reply('🧾 Виберіть послуги:', {
             reply_markup: servicesKeyboard(s.services ?? []),
         });
     }
 
     // ---------- status change ----------
     @Action(/^st:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     async onStatus(@Ctx() ctx: BotContext) {
-        if (!(await this.requireAllowed(ctx))) return ctx.answerCbQuery();
-
         const data = String((ctx.callbackQuery as any).data);
         const [, publicIdStr, statusStr] = data.split(':');
         const publicId = Number(publicIdStr);
@@ -327,9 +373,10 @@ export class BotUpdate {
                 s.step = 'finalTotal';
                 s.finalizePublicId = publicId;
                 await ctx.answerCbQuery();
-                return ctx.reply(
-                    `💵 Введите итоговую сумму для заказа #${publicId}:`
+                await ctx.reply(
+                    `💵 Введіть підсумкову суму для замовлення #${publicId}:`
                 );
+                return;
             }
 
             const updated = await this.orders.changeStatus({
@@ -340,7 +387,7 @@ export class BotUpdate {
 
             if (!updated) {
                 await ctx.answerCbQuery();
-                await ctx.reply('❌ Заказ не найден');
+                await ctx.reply('❌ Замовлення не знайдено');
                 return;
             }
 
@@ -352,25 +399,25 @@ export class BotUpdate {
                 ctx,
                 adminIds,
                 updated,
-                `🔔 Статус изменён: #${updated.publicId}`
+                `🔔 Статус змінено: #${updated.publicId}`
             );
         } catch (e: any) {
             await ctx.answerCbQuery();
 
             if (e?.status === 400) {
                 await ctx.reply(
-                    `⚠️ Нельзя сменить статус:\n${e.response?.message}`
+                    `⚠️ Неможливо змінити статус:\n${e.response?.message}`
                 );
                 return;
             }
 
             if (e?.status === 404) {
-                await ctx.reply('❌ Заказ не найден');
+                await ctx.reply('❌ Замовлення не знайдено');
                 return;
             }
 
             console.error('Status change error', e);
-            await ctx.reply('🚨 Внутренняя ошибка. Попробуйте позже.');
+            await ctx.reply('🚨 Внутрішня помилка. Спробуйте пізніше.');
         }
     }
 
@@ -380,14 +427,84 @@ export class BotUpdate {
         const s = ensureSession(ctx);
         const text = String((ctx.message as any).text || '').trim();
 
-        if (!(await this.requireAllowed(ctx))) return;
+        // Check if user wants to check order status (for regular users)
+        if (s.flow === 'checkStatus' && s.step === 'waitingForOrderId') {
+            const publicId = Number(text);
 
-        // 1) обработка "📌 Открыть заказ" (ввод id)
+            if (!publicId) {
+                await ctx.reply(
+                    '❌ Введіть коректний номер замовлення (число)'
+                );
+                return;
+            }
+
+            try {
+                const status = await this.warranty.getOrderStatus(publicId);
+
+                const statusEmoji: Record<string, string> = {
+                    ACCEPTED: '🟡',
+                    IN_PROGRESS: '🔵',
+                    READY: '🟢',
+                    DONE: '⚫',
+                };
+
+                const statusNames: Record<string, string> = {
+                    ACCEPTED: 'Прийнято',
+                    IN_PROGRESS: 'В роботі',
+                    READY: 'Готово',
+                    DONE: 'Видано',
+                };
+
+                let message = `📋 Замовлення #${status.orderId}\n\n`;
+                message += `${statusEmoji[status.status] || '❓'} Статус: ${statusNames[status.status] || status.status}\n`;
+                message += `💰 Орієнтовно: ${status.estimatedTotal || '—'} грн\n`;
+                message += `🔧 Послуг: ${status.servicesCount}\n`;
+
+                if (status.finalTotal) {
+                    message += `💵 Разом до сплати: ${status.finalTotal} грн\n`;
+                }
+
+                if (status.completedAt) {
+                    message += `✅ Завершено: ${status.completedAt.toLocaleDateString('uk-UA')}\n`;
+                }
+
+                s.flow = null;
+                s.step = undefined;
+
+                await ctx.reply(message);
+            } catch (error: any) {
+                s.flow = null;
+                s.step = undefined;
+
+                if (error.status === 404) {
+                    await ctx.reply('❌ Замовлення не знайдено');
+                } else {
+                    await ctx.reply('🚨 Помилка при перевірці статусу');
+                }
+            }
+            return;
+        }
+
+        // Check if user is employee for other flows
+        const tgId = BigInt(ctx.from!.id);
+        const isEmployee = await this.auth.isActiveEmployee(tgId);
+
+        if (!isEmployee) {
+            // Regular users can only check status, nothing else
+            return;
+        }
+
+        // Employee-only flows below this point
+
+        // 1) обработка "📌 Відкрити замовлення" (ввод id)
         if (s.step === 'openPublicId') {
             s.step = undefined;
 
             const id = Number(text);
-            if (!id) return ctx.reply('Введите число, например: 1234');
+            if (!id) {
+                await ctx.reply('Введіть число, наприклад: 1234');
+                return;
+            }
 
             try {
                 const order = await this.orders.getByPublicId(id);
@@ -398,11 +515,13 @@ export class BotUpdate {
                 );
             } catch (e: any) {
                 if (e?.status === 404) {
-                    await ctx.reply('❌ Заказ с таким номером не найден');
+                    await ctx.reply(
+                        '❌ Замовлення з таким номером не знайдено'
+                    );
                     return;
                 }
                 console.error('openPublicId error', e);
-                await ctx.reply('🚨 Ошибка. Попробуйте позже.');
+                await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
             }
             return;
         }
@@ -419,14 +538,17 @@ export class BotUpdate {
                     limit: 20,
                 });
 
-                if (!list.length) return ctx.reply('Ничего не найдено.');
+                if (!list.length) {
+                    await ctx.reply('Нічого не знайдено.');
+                    return;
+                }
 
                 for (const o of list) {
                     await sendOrderCard(ctx, o, o.status !== OrderStatus.DONE);
                 }
             } catch (e: any) {
                 console.error('Search error', e);
-                await ctx.reply('🚨 Ошибка поиска');
+                await ctx.reply('🚨 Помилка пошуку');
             }
             return;
         }
@@ -437,14 +559,16 @@ export class BotUpdate {
             if (s.step === 'finalTotal') {
                 const finalTotal = parseIntStrict(text);
                 if (!finalTotal || finalTotal <= 0) {
-                    return ctx.reply('Введите корректную сумму');
+                    await ctx.reply('Введіть коректну суму');
+                    return;
                 }
 
                 s.finalTotal = finalTotal;
                 s.step = 'clientEmail';
-                return ctx.reply(
-                    '📧 Введите email клиента для отправки гарантийного талона (или "-" если без email):'
+                await ctx.reply(
+                    '📧 Введіть email клієнта для відправки гарантійного талона (або "-" якщо без email):'
                 );
+                return;
             }
 
             // Шаг 2 — ввод email
@@ -453,25 +577,41 @@ export class BotUpdate {
 
                 if (text !== '-') {
                     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
-                        return ctx.reply('Введите корректный email или "-"');
+                        await ctx.reply('Введіть коректний email або "-"');
+                        return;
                     }
                     email = text;
                 }
 
                 try {
-                    const order = await this.orders.finalizeOrder({
+                    const result = await this.orders.finalizeOrder({
                         orderPublicId: s.finalizePublicId!,
                         byTgId: BigInt(ctx.from!.id),
                         finalTotal: s.finalTotal!,
                         clientEmail: email,
                     });
 
+                    // Деструктурируем результат
+                    const order = result.order as any;
+                    const pdfBuffer = result.pdfBuffer;
+
+                    // Отправляем гарантийный талон в Telegram чат
+                    await ctx.replyWithDocument(
+                        {
+                            source: pdfBuffer,
+                            filename: `warranty-${order.publicId}.pdf`,
+                        },
+                        {
+                            caption: `📄 Гарантійний талон #${order.publicId}\n\n${order.clientEmail ? `📧 Відправлено на: ${order.clientEmail}` : '✅ Збережено в чернетках пошти'}`,
+                        }
+                    );
+
                     const adminIds = await this.auth.getActiveAdminTgIds();
                     await notifyAllAdmins(
                         ctx,
                         adminIds,
                         order,
-                        `⚫ Заказ выдан: #${order.publicId}`
+                        `⚫ Замовлення видано: #${order.publicId}`
                     );
 
                     s.flow = null;
@@ -481,7 +621,7 @@ export class BotUpdate {
                     await sendOrderCard(ctx, order, false);
                 } catch (e) {
                     console.error('finalize error', e);
-                    await ctx.reply('🚨 Ошибка при выдаче заказа');
+                    await ctx.reply('🚨 Помилка при видачі замовлення');
                 }
                 return;
             }

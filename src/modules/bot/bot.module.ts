@@ -1,24 +1,22 @@
 import { Module } from '@nestjs/common';
-import { TelegrafModule } from 'nestjs-telegraf';
-import { ConfigService } from '@nestjs/config';
-import { session } from 'telegraf';
+import { APP_GUARD } from '@nestjs/core';
 
 import { BotUpdate } from './bot.update';
+import { WarrantyVerificationHandler } from './handlers';
 import { AuthModule } from '../auth/auth.module';
 import { OrdersModule } from '../orders/orders.module';
+import { WarrantyModule } from '../warranty/warranty.module';
+import { RolesGuard } from '../../common/guards';
 
 @Module({
-    imports: [
-        TelegrafModule.forRootAsync({
-            inject: [ConfigService],
-            useFactory: (cfg: ConfigService) => ({
-                token: cfg.get<string>('botToken')!,
-                middlewares: [session()],
-            }),
-        }),
-        AuthModule,
-        OrdersModule,
+    imports: [AuthModule, OrdersModule, WarrantyModule],
+    providers: [
+        BotUpdate,
+        WarrantyVerificationHandler,
+        {
+            provide: APP_GUARD,
+            useClass: RolesGuard,
+        },
     ],
-    providers: [BotUpdate],
 })
 export class BotModule {}

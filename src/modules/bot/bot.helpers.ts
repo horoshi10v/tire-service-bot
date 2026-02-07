@@ -63,7 +63,7 @@ export function formatOrderShort(order: any) {
     const itemsText = (order.items || [])
         .map((it: any) => {
             const label = SERVICE_LABELS[it.service] ?? String(it.service);
-            const w = it.warrantyDays ? `, гарантия ${it.warrantyDays}д` : '';
+            const w = it.warrantyDays ? `, гарантія ${it.warrantyDays}д` : '';
             const c = it.comment ? ` (${it.comment})` : '';
             return `• ${label} — ${it.price}${c}${w}`;
         })
@@ -72,10 +72,10 @@ export function formatOrderShort(order: any) {
     return (
         `#${order.publicId} ${STATUS_LABELS[order.status]}\n` +
         `📞 ${order.clientPhone}\n` +
-        `👤 Принял: ${formatMaster(order)}\n` +
-        `🧾 Услуги:\n${itemsText || '—'}\n` +
-        `💰 Ориентир: ${order.estimateTotal ?? '—'}\n` +
-        `💵 Итог: ${order.finalTotal ?? '—'}`
+        `👤 Прийняв: ${formatMaster(order)}\n` +
+        `🧾 Послуги:\n${itemsText || '—'}\n` +
+        `💰 Орієнтир: ${order.estimateTotal ?? '—'}\n` +
+        `💵 Разом: ${order.finalTotal ?? '—'}`
     );
 }
 

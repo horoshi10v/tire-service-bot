@@ -1,6 +1,6 @@
 import type { ServiceType } from '@prisma/client';
 
-export type BotFlow = 'create' | 'search' | 'finalize' | null;
+export type BotFlow = 'create' | 'search' | 'finalize' | 'checkStatus' | null;
 
 export type CreateStep =
     | 'phone'
@@ -18,6 +18,8 @@ export type FinalizeStep = 'finalTotal' | 'clientEmail';
 
 export type OpenStep = 'openPublicId';
 
+export type CheckStatusStep = 'waitingForOrderId';
+
 export interface OrderDraftItem {
     service: ServiceType;
     price: number;
@@ -27,7 +29,7 @@ export interface OrderDraftItem {
 
 export interface BotSessionData {
     flow: BotFlow;
-    step?: CreateStep | SearchStep | FinalizeStep | OpenStep;
+    step?: CreateStep | SearchStep | FinalizeStep | OpenStep | CheckStatusStep;
 
     // create order flow
     photoFileId?: string;
@@ -49,10 +51,9 @@ export interface BotSessionData {
     // finalize flow
     finalizePublicId?: number;
     finalTotal?: number;
-    clientEmail?: string; // email клиента
+    clientEmail?: string; // client email
 }
 
-// удобный дефолт, чтобы ensureSession мог просто присвоить
 export const DEFAULT_SESSION: BotSessionData = {
     flow: null,
     services: [],

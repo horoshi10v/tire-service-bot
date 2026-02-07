@@ -3,34 +3,34 @@ import { OrderStatus, ServiceType } from '@prisma/client';
 
 export const SERVICE_LABELS: Record<ServiceType, string> = {
     TIRE_MOUNTING: 'Шиномонтаж',
-    STRAIGHTENING: 'Рихтовка',
-    WELDING: 'Сварка',
-    BALANCING: 'Баллансировка',
-    SIDE_REPAIR: 'Боковой ремонт',
-    INSPECTION: 'Проверка',
+    STRAIGHTENING: 'Рихтування',
+    WELDING: 'Зварювання',
+    BALANCING: 'Балансування',
+    SIDE_REPAIR: 'Боковий ремонт',
+    INSPECTION: 'Перевірка',
     PUNCTURE: 'Прокол',
-    PAINTING: 'Покраска',
-    OTHER: 'Другое',
+    PAINTING: 'Фарбування',
+    OTHER: 'Інше',
 };
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
-    ACCEPTED: '🟡 Принято',
-    IN_PROGRESS: '🔵 В работе',
-    READY: '🟢 Готов',
-    DONE: '⚫ Выдан',
+    ACCEPTED: '🟡 Прийнято',
+    IN_PROGRESS: '🔵 В роботі',
+    READY: '🟢 Готово',
+    DONE: '⚫ Видано',
 };
 
-/** Нижнее меню (кнопки снизу в чате) */
+/** Нижнє меню (кнопки знизу в чаті) */
 export function mainMenuKeyboard(): ReplyKeyboardMarkup {
     return {
         resize_keyboard: true,
         one_time_keyboard: false,
         is_persistent: true,
         keyboard: [
-            ['🆕 Новый', '🔍 Поиск'],
-            ['🟡 Принятые', '🔵 В работе'],
-            ['🟢 Готовые', '⚫ Выданные'],
-            ['📌 Открыть заказ', '📊 Сводка'],
+            ['🆕 Новий', '🔍 Пошук'],
+            ['🟡 Прийняті', '🔵 В роботі'],
+            ['🟢 Готові', '⚫ Видані'],
+            ['📌 Відкрити замовлення', '📊 Зведення'],
         ],
     };
 }
@@ -87,7 +87,7 @@ export function staffKeyboard(
         { text: s.name, callback_data: `staff:${s.tgId}` },
     ]);
 
-    rows.push([{ text: '✍️ Ввести вручную', callback_data: 'staff:manual' }]);
+    rows.push([{ text: '✍️ Ввести вручну', callback_data: 'staff:manual' }]);
 
     return { inline_keyboard: rows };
 }

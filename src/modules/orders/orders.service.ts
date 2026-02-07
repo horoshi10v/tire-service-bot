@@ -1,32 +1,44 @@
-import {
-    BadRequestException,
-    ForbiddenException,
-    Injectable,
-    NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EmployeeRole, OrderStatus, Prisma } from '@prisma/client';
+import { EmployeeRole, OrderStatus } from '@prisma/client';
 import {
     AddItemsInput,
     ChangeStatusInput,
     CreateOrderInput,
     FinalizeOrderInput,
+    FinalizeOrderResult,
     SearchOrdersInput,
 } from './orders.types';
-import { WarrantyPdfService } from '../pdf/warranty-pdf.service';
-import { MailService } from '../mail/mail.service';
+import { OrderStateMachine } from '../../common/domain';
+import {
+    OrderNotFoundException,
+    OrderAlreadyDoneException,
+    ValidationException,
+    InsufficientPermissionsException,
+    UserNotActiveException,
+} from '../../common/exceptions';
+import type {
+    IMailService,
+    IPdfGenerator,
+    IOrdersRepository,
+} from '../../common/interfaces';
+import {
+    MAIL_SERVICE,
+    PDF_GENERATOR,
+    ORDERS_REPOSITORY,
+} from '../../common/interfaces';
+import { NotificationService } from '../notifications/notification-strategies';
 
-const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
-    ACCEPTED: ['IN_PROGRESS', 'READY', 'DONE'],
-    IN_PROGRESS: ['READY', 'DONE'],
-    READY: ['DONE'],
-    DONE: [],
-};
-
-function normalizePhone(p: string) {
+/**
+ * Normalizes phone number by removing non-digit characters
+ */
+function normalizePhone(p: string): string {
     return p.replace(/[^\d+]/g, '').trim();
 }
 
+/**
+ * Calculates warranty expiration date
+ */
 function calcWarrantyUntil(base: Date, days?: number | null): Date | null {
     if (!days || days <= 0) return null;
     const d = new Date(base);
@@ -34,12 +46,23 @@ function calcWarrantyUntil(base: Date, days?: number | null): Date | null {
     return d;
 }
 
+/**
+ * OrdersService - Application Service for order management
+ *
+ * SRP: Orchestrates order operations, delegates to specialized services
+ * DIP: Depends on abstractions (could be improved with repository interface)
+ */
 @Injectable()
 export class OrdersService {
+    private readonly logger = new Logger(OrdersService.name);
+
     constructor(
-        private prisma: PrismaService,
-        private warrantyPdf: WarrantyPdfService,
-        private mail: MailService
+        private readonly prisma: PrismaService,
+        @Inject(PDF_GENERATOR) private readonly warrantyPdf: IPdfGenerator,
+        @Inject(MAIL_SERVICE) private readonly mail: IMailService,
+        private readonly notificationService: NotificationService,
+        @Inject(ORDERS_REPOSITORY)
+        private readonly repository: IOrdersRepository
     ) {}
 
     /**
@@ -50,13 +73,12 @@ export class OrdersService {
     private async requireRole(tgId: bigint, roles: EmployeeRole[]) {
         const emp = await this.prisma.employee.findUnique({
             where: { tgId },
-            select: { role: true, isActive: true, id: true },
+            select: { role: true, isActive: true, id: true, tgId: true },
         });
 
-        if (!emp || !emp.isActive)
-            throw new ForbiddenException('User is not active');
+        if (!emp || !emp.isActive) throw new UserNotActiveException();
         if (!roles.includes(emp.role))
-            throw new ForbiddenException('Not enough permissions');
+            throw new InsufficientPermissionsException();
 
         return emp;
     }
@@ -73,13 +95,13 @@ export class OrdersService {
 
         const clientPhone = normalizePhone(input.clientPhone);
         if (!clientPhone)
-            throw new BadRequestException('clientPhone is required');
+            throw new ValidationException("Телефон клієнта обов'язковий");
         if (!input.items?.length)
-            throw new BadRequestException('At least one service is required');
+            throw new ValidationException('Потрібна хоча б одна послуга');
 
         const now = new Date();
 
-        return this.prisma.order.create({
+        const order = await this.prisma.order.create({
             data: {
                 clientPhone,
                 status: OrderStatus.ACCEPTED,
@@ -105,6 +127,15 @@ export class OrdersService {
                 createdBy: { select: { name: true, tgId: true } },
             },
         });
+
+        await this.notificationService.notifyOrderCreated({
+            orderId: order.id,
+            publicId: order.publicId,
+            clientPhone: order.clientPhone,
+            createdByTgId: createdBy.tgId,
+        });
+
+        return order;
     }
 
     async addItems(input: AddItemsInput) {
@@ -117,9 +148,9 @@ export class OrdersService {
             where: { publicId: input.orderPublicId },
             select: { id: true, status: true },
         });
-        if (!order) throw new NotFoundException('Order not found');
+        if (!order) throw new OrderNotFoundException(input.orderPublicId);
         if (order.status === OrderStatus.DONE)
-            throw new BadRequestException('Order already DONE');
+            throw new OrderAlreadyDoneException(input.orderPublicId);
 
         const now = new Date();
 
@@ -161,54 +192,37 @@ export class OrdersService {
             },
         });
 
-        if (!order) throw new NotFoundException('Order not found');
+        if (!order) throw new OrderNotFoundException(input.orderPublicId);
 
-        if (order.status === OrderStatus.DONE) {
-            throw new BadRequestException('Order already DONE');
+        if (OrderStateMachine.isFinalState(order.status)) {
+            throw new OrderAlreadyDoneException(input.orderPublicId);
         }
 
-        const allowed = STATUS_FLOW[order.status] || [];
-        if (!allowed.includes(input.status)) {
-            throw new BadRequestException(
-                `Invalid status transition: ${order.status} -> ${input.status}`
-            );
-        }
+        OrderStateMachine.validateTransition(order.status, input.status);
 
         if (input.status === OrderStatus.DONE) {
-            throw new BadRequestException('Use finalizeOrder to set DONE');
-        }
-
-        const ops: Prisma.PrismaPromise<any>[] = [];
-
-        // Автоперехват заказа, если работает другой мастер
-        if (order.assignedToId !== by.id) {
-            ops.push(
-                this.prisma.order.update({
-                    where: { id: order.id },
-                    data: { assignedToId: by.id },
-                }),
-                this.prisma.orderTransfer.create({
-                    data: {
-                        orderId: order.id,
-                        fromId: order.assignedToId,
-                        toId: by.id,
-                        byId: by.id,
-                    },
-                })
+            throw new ValidationException(
+                'Використовуйте finalizeOrder для завершення замовлення'
             );
         }
 
-        // Обновление статуса
-        ops.push(
-            this.prisma.order.update({
+        if (order.assignedToId !== by.id) {
+            await this.repository.transferAndUpdateStatus({
+                orderId: order.id,
+                fromMasterId: order.assignedToId,
+                toMasterId: by.id,
+                newStatus: input.status,
+                transferredByTgId: by.tgId,
+            });
+        } else {
+            // Same master, just update status
+            await this.prisma.order.update({
                 where: { id: order.id },
                 data: { status: input.status },
-            })
-        );
+            });
+        }
 
-        await this.prisma.$transaction(ops);
-
-        return this.prisma.order.findUnique({
+        const updatedOrder = await this.prisma.order.findUnique({
             where: { id: order.id },
             include: {
                 items: true,
@@ -216,9 +230,23 @@ export class OrdersService {
                 assignedTo: { select: { name: true, tgId: true } },
             },
         });
+
+        if (updatedOrder) {
+            await this.notificationService.notifyStatusChanged({
+                orderId: updatedOrder.id,
+                publicId: updatedOrder.publicId,
+                fromStatus: order.status,
+                toStatus: input.status,
+                changedByTgId: by.tgId,
+            });
+        }
+
+        return updatedOrder;
     }
 
-    async finalizeOrder(input: FinalizeOrderInput) {
+    async finalizeOrder(
+        input: FinalizeOrderInput
+    ): Promise<FinalizeOrderResult> {
         const order = await this.prisma.order.update({
             where: { publicId: input.orderPublicId },
             data: {
@@ -230,15 +258,16 @@ export class OrdersService {
             include: {
                 items: true,
                 acceptedBy: true,
+                createdBy: true,
                 assignedTo: true,
             },
         });
 
-        // 1. Генерируем PDF
+        // 1. Generate PDF
         const pdfBytes = await this.warrantyPdf.generate(order);
         const pdfBuffer = Buffer.from(pdfBytes);
 
-        // 2. Отправляем email
+        // 2. Send email if provided
         if (order.clientEmail) {
             await this.mail.sendPdf(
                 order.clientEmail,
@@ -249,12 +278,24 @@ export class OrdersService {
             );
         }
 
-        return order;
+        // 3. Save to drafts for backup
+        await this.mail.saveToDrafts(
+            `Гарантійний талон #${order.publicId}`,
+            `Замовлення #${order.publicId}\nКлієнт: ${order.clientPhone}\n${order.clientEmail ? `Email: ${order.clientEmail}` : 'Email не вказано'}\n\nГарантійний талон у вкладенні.`,
+            pdfBuffer,
+            `warranty-${order.publicId}.pdf`
+        );
+
+        // 4. Return order with PDF buffer for Telegram sending
+        return { order, pdfBuffer };
     }
 
     async searchByPhone(input: SearchOrdersInput) {
         const phone = normalizePhone(input.phonePart);
-        if (!phone) throw new BadRequestException('phonePart is required');
+        if (!phone)
+            throw new ValidationException(
+                "Частина номера телефону обов'язкова"
+            );
 
         return this.prisma.order.findMany({
             where: {
@@ -281,7 +322,7 @@ export class OrdersService {
                 createdBy: { select: { name: true, tgId: true } },
             },
         });
-        if (!order) throw new NotFoundException('Order not found');
+        if (!order) throw new OrderNotFoundException(publicId);
         return order;
     }
 

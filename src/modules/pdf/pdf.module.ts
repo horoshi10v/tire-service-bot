@@ -1,8 +1,16 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { WarrantyPdfService } from './warranty-pdf.service';
+import { PDF_GENERATOR } from '../../common/interfaces';
+import { WarrantyModule } from '../warranty/warranty.module';
 
 @Module({
-    providers: [WarrantyPdfService],
-    exports: [WarrantyPdfService],
+    imports: [forwardRef(() => WarrantyModule)],
+    providers: [
+        {
+            provide: PDF_GENERATOR,
+            useClass: WarrantyPdfService,
+        },
+    ],
+    exports: [PDF_GENERATOR],
 })
 export class PdfModule {}

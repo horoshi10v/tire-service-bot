@@ -4,6 +4,6 @@
     "sourceRoot": "src",
     "compilerOptions": {
         "deleteOutDir": true,
-        "assets": ["modules/pdf/fonts/**/*"]
+        "assets": ["modules/pdf/fonts/**/*", "modules/pdf/icon/**/*"]
     }
 }

@@ -1,11 +1,11 @@
 import { OrderStatus, ServiceType } from '@prisma/client';
+import { OrderWithRelations } from '../../common/interfaces';
 
 export type CreateOrderInput = {
     clientPhone: string;
     photoFileId?: string | null;
 
-    // tgId того, кто принял (MASTER) и кто создал (MASTER) — в боте это обычно одно и то же,
-    // но оставим гибкость
+    // tgId mast be MASTER or ADMIN
     acceptedByTgId: bigint;
     createdByTgId: bigint;
 
@@ -21,7 +21,7 @@ export type CreateOrderInput = {
 
 export type AddItemsInput = {
     orderPublicId: number;
-    byTgId: bigint; // кто добавляет (MASTER/ADMIN)
+    byTgId: bigint; // who add (MASTER/ADMIN)
     items: CreateOrderInput['items'];
 };
 
@@ -37,6 +37,11 @@ export type FinalizeOrderInput = {
     finalTotal: number;
     clientEmail?: string | null;
     doneAt?: Date;
+};
+
+export type FinalizeOrderResult = {
+    order: OrderWithRelations;
+    pdfBuffer: Buffer;
 };
 
 export type SearchOrdersInput = {

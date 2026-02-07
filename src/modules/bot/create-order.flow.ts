@@ -20,13 +20,13 @@ export async function handleCreateOrderFlow(
     const text = String((ctx.message as any)?.text || '').trim();
     const tgId = BigInt(ctx.from!.id);
 
-    // гарантируем массивы
+    // ensure arrays
     s.items ??= [];
     s.services ??= [];
 
     if (s.step === 'phone') {
         if (!isPhoneLike(text)) {
-            await ctx.reply('Введите корректный номер (минимум 7 цифр)');
+            await ctx.reply('Введіть коректний номер (мінімум 7 цифр)');
             return;
         }
         s.phone = text;
@@ -34,10 +34,10 @@ export async function handleCreateOrderFlow(
 
         const staff = (await auth.getActiveStaff()).map((s) => ({
             tgId: s.tgId,
-            name: s.name || 'Без имени',
+            name: s.name || 'Без імені',
         }));
 
-        await ctx.reply('👤 Кто принял заказ?', {
+        await ctx.reply('👤 Хто прийняв замовлення?', {
             reply_markup: staffKeyboard(staff),
         });
         return;
@@ -48,7 +48,7 @@ export async function handleCreateOrderFlow(
         s.acceptedByTgId = tgId;
         s.step = 'services';
 
-        await ctx.reply('🧾 Выберите услуги:', {
+        await ctx.reply('🧾 Виберіть послуги:', {
             reply_markup: servicesKeyboard(s.services),
         });
         return;
@@ -57,7 +57,7 @@ export async function handleCreateOrderFlow(
     if (s.step === 'servicePrice' && s.pendingService) {
         const price = parseIntStrict(text);
         if (price === null || price < 0) {
-            await ctx.reply('Цена должна быть числом (>= 0)');
+            await ctx.reply('Ціна має бути числом (>= 0)');
             return;
         }
 
@@ -65,7 +65,7 @@ export async function handleCreateOrderFlow(
         s.step = 'serviceComment';
 
         await ctx.reply(
-            `📝 Комментарий к "${SERVICE_LABELS[s.pendingService]}"? (или "-")`
+            `📝 Коментар до "${SERVICE_LABELS[s.pendingService]}"? (або "-")`
         );
         return;
     }
@@ -76,7 +76,7 @@ export async function handleCreateOrderFlow(
         s.step = 'serviceWarranty';
 
         await ctx.reply(
-            `🛡 Гарантия (дней) для "${SERVICE_LABELS[last.service]}"? (0 или "-")`
+            `🛡 Гарантія (днів) для "${SERVICE_LABELS[last.service]}"? (0 або "-")`
         );
         return;
     }
@@ -85,7 +85,7 @@ export async function handleCreateOrderFlow(
         const last = s.items.at(-1)!;
         const wd = text === '-' ? 0 : parseIntStrict(text);
         if (wd === null || wd < 0) {
-            await ctx.reply('Введите число дней или "-"');
+            await ctx.reply('Введіть кількість днів або "-"');
             return;
         }
 
@@ -99,14 +99,14 @@ export async function handleCreateOrderFlow(
         if (next) {
             s.pendingService = next;
             s.step = 'servicePrice';
-            await ctx.reply(`💰 Цена за "${SERVICE_LABELS[next]}":`);
+            await ctx.reply(`💰 Ціна за "${SERVICE_LABELS[next]}":`);
             return;
         }
 
         const sum = s.items.reduce((a, i) => a + i.price, 0);
         s.step = 'estimateTotal';
 
-        await ctx.reply(`💰 Ориентировочная сумма? (число или "-" = ${sum})`);
+        await ctx.reply(`💰 Орієнтовна сума? (число або "-" = ${sum})`);
         return;
     }
 
@@ -115,7 +115,7 @@ export async function handleCreateOrderFlow(
         if (text !== '-') {
             const n = parseIntStrict(text);
             if (n === null || n < 0) {
-                await ctx.reply('Введите число или "-"');
+                await ctx.reply('Введіть число або "-"');
                 return;
             }
             estimate = n;
@@ -124,7 +124,7 @@ export async function handleCreateOrderFlow(
         const created = await orders.createOrder({
             clientPhone: s.phone!,
             photoFileId: s.photoFileId!,
-            acceptedByTgId: s.acceptedByTgId!, // выбранный мастер
+            acceptedByTgId: s.acceptedByTgId!, // selected master
             createdByTgId: tgId,
             items: s.items.map((i) => ({
                 service: i.service,
@@ -136,7 +136,7 @@ export async function handleCreateOrderFlow(
         });
 
         const adminIds = await auth.getActiveAdminTgIds();
-        await notifyAllAdmins(ctx, adminIds, created, '🆕 Новый заказ');
+        await notifyAllAdmins(ctx, adminIds, created, '🆕 Нове замовлення');
 
         ctx.session = { ...DEFAULT_SESSION };
         await sendOrderCard(ctx, created, true);

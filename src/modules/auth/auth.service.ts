@@ -44,4 +44,26 @@ export class AuthService {
                 name: s.name!,
             }));
     }
+
+    /**
+     * Check if user is an active employee (ADMIN or MASTER)
+     */
+    async isActiveEmployee(tgId: number | bigint): Promise<boolean> {
+        const user = await this.prisma.employee.findUnique({
+            where: { tgId: BigInt(tgId) },
+            select: { role: true, isActive: true },
+        });
+        return !!user && user.isActive;
+    }
+
+    /**
+     * Get user role for authorization
+     */
+    async getUserRole(tgId: number | bigint): Promise<EmployeeRole | null> {
+        const user = await this.prisma.employee.findUnique({
+            where: { tgId: BigInt(tgId) },
+            select: { role: true, isActive: true },
+        });
+        return user?.isActive ? user.role : null;
+    }
 }
