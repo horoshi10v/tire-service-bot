@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
-
 import { BotUpdate } from './bot.update';
 import { WarrantyVerificationHandler } from './handlers';
 import { AuthModule } from '../auth/auth.module';
@@ -11,13 +9,6 @@ import { RolesGuard } from '../../common/guards';
 
 @Module({
     imports: [AuthModule, OrdersModule, WarrantyModule, SheetsModule],
-    providers: [
-        BotUpdate,
-        WarrantyVerificationHandler,
-        {
-            provide: APP_GUARD,
-            useClass: RolesGuard,
-        },
-    ],
+    providers: [BotUpdate, WarrantyVerificationHandler, RolesGuard],
 })
 export class BotModule {}

@@ -7,6 +7,7 @@ import {
     Action,
     Hears,
 } from 'nestjs-telegraf';
+import { UseGuards } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import { AuthService } from '../auth/auth.service';
 import { OrdersService } from '../orders/orders.service';
@@ -26,6 +27,7 @@ import {
 import { handleCreateOrderFlow } from './create-order.flow';
 import { ordersListKeyboard, statusListTitle } from './orders.gallery';
 import { Roles, UserRole } from '../../common/guards';
+import { RolesGuard } from '../../common/guards';
 import { WarrantyVerificationService } from '../warranty';
 import { WarrantyVerificationHandler } from './handlers';
 import { SheetsService } from '../integrations/sheets/sheets.service';
@@ -35,6 +37,7 @@ type BotContext = Context & { session: BotSessionData };
 const PAGE_SIZE = 10;
 
 @Update()
+@UseGuards(RolesGuard)
 export class BotUpdate {
     constructor(
         private auth: AuthService,
@@ -167,6 +170,21 @@ export class BotUpdate {
         } catch (e) {
             console.error('backup error', e);
             await ctx.reply('🚨 Помилка бекапу. Спробуйте пізніше.');
+        }
+    }
+
+    @Command('sync_staff')
+    @Roles(UserRole.ADMIN)
+    async syncStaff(@Ctx() ctx: BotContext) {
+        await ctx.reply('⏳ Синхронізую Staff…');
+        try {
+            const res = await this.sheets.syncStaffToDb();
+            await ctx.reply(
+                `✅ Staff синхронізовано.\nОновлено: ${res.upserted}\nДеактивовано: ${res.deactivated}`
+            );
+        } catch (e) {
+            console.error('sync_staff error', e);
+            await ctx.reply('🚨 Помилка синхронізації Staff. Спробуйте пізніше.');
         }
     }
 

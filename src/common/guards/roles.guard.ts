@@ -4,9 +4,13 @@ import {
     ExecutionContext,
     ForbiddenException,
     UnauthorizedException,
+    Logger,
+    Optional,
+    SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthService } from '../../modules/auth/auth.service';
+import { SheetsService } from '../../modules/integrations/sheets/sheets.service';
 
 /**
  * Guard for role-based access control in Telegram bot
@@ -23,17 +27,20 @@ export enum UserRole {
 }
 
 export const ROLES_KEY = 'roles';
-export const Roles = (...roles: UserRole[]) =>
-    Reflect.metadata(ROLES_KEY, roles);
+export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
 
 export const PUBLIC_KEY = 'isPublic';
-export const Public = () => Reflect.metadata(PUBLIC_KEY, true);
+export const Public = () => SetMetadata(PUBLIC_KEY, true);
 
 @Injectable()
 export class RolesGuard implements CanActivate {
+    private readonly logger = new Logger(RolesGuard.name);
+    private lastStaffSyncAt = 0;
+
     constructor(
         private readonly reflector: Reflector,
-        private readonly authService: AuthService
+        private readonly authService: AuthService,
+        @Optional() private readonly sheets?: SheetsService
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -69,7 +76,19 @@ export class RolesGuard implements CanActivate {
         }
 
         // Check specific role requirements
-        const hasAccess = await this.checkUserRoles(userTgId, requiredRoles);
+        let hasAccess = await this.checkUserRoles(userTgId, requiredRoles);
+
+        // If access denied for admin/master, try to sync staff from Google Sheet
+        if (
+            !hasAccess &&
+            this.sheets &&
+            requiredRoles.some(
+                (r) => r === UserRole.ADMIN || r === UserRole.MASTER
+            )
+        ) {
+            await this.trySyncStaff();
+            hasAccess = await this.checkUserRoles(userTgId, requiredRoles);
+        }
 
         if (!hasAccess) {
             throw new ForbiddenException(
@@ -78,6 +97,19 @@ export class RolesGuard implements CanActivate {
         }
 
         return true;
+    }
+
+    private async trySyncStaff() {
+        const now = Date.now();
+        if (now - this.lastStaffSyncAt < 60_000) {
+            return;
+        }
+        this.lastStaffSyncAt = now;
+        try {
+            await this.sheets?.syncStaffToDb();
+        } catch (e) {
+            this.logger.warn('Staff sync failed');
+        }
     }
 
     /**
