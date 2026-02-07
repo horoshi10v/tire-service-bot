@@ -28,6 +28,7 @@ import { ordersListKeyboard, statusListTitle } from './orders.gallery';
 import { Roles, UserRole } from '../../common/guards';
 import { WarrantyVerificationService } from '../warranty';
 import { WarrantyVerificationHandler } from './handlers';
+import { SheetsService } from '../integrations/sheets/sheets.service';
 
 type BotContext = Context & { session: BotSessionData };
 
@@ -39,7 +40,8 @@ export class BotUpdate {
         private auth: AuthService,
         private orders: OrdersService,
         private warranty: WarrantyVerificationService,
-        private warrantyHandler: WarrantyVerificationHandler
+        private warrantyHandler: WarrantyVerificationHandler,
+        private sheets: SheetsService
     ) {}
 
     private async showStatusList(
@@ -151,6 +153,49 @@ export class BotUpdate {
         s.flow = 'search';
         s.step = 'phonePart';
         await ctx.reply('Введіть номер телефону (або частину):');
+    }
+
+    @Command('backup')
+    @Roles(UserRole.ADMIN)
+    async backup(@Ctx() ctx: BotContext) {
+        await ctx.reply('⏳ Створюю бекап у вкладці Backup…');
+        try {
+            const res = await this.sheets.backupAllOrdersToSheet();
+            await ctx.reply(
+                `✅ Бекап готовий.\nЗамовлень: ${res.orders}\nПослуг: ${res.items}`
+            );
+        } catch (e) {
+            console.error('backup error', e);
+            await ctx.reply('🚨 Помилка бекапу. Спробуйте пізніше.');
+        }
+    }
+
+    @Command('restore')
+    @Roles(UserRole.ADMIN)
+    async restore(@Ctx() ctx: BotContext) {
+        const text = String((ctx.message as any)?.text || '');
+        const parts = text.split(/\s+/).map((p) => p.trim());
+        const confirmed = parts.includes('CONFIRM');
+
+        if (!confirmed) {
+            await ctx.reply(
+                '⚠️ Відновлення перезапише замовлення з вкладки Backup (upsert по publicId).\n' +
+                    'Щоб підтвердити, виконайте:\n' +
+                    '/restore CONFIRM'
+            );
+            return;
+        }
+
+        await ctx.reply('⏳ Відновлюю замовлення з вкладки Backup…');
+        try {
+            const res = await this.sheets.restoreOrdersFromBackup();
+            await ctx.reply(
+                `✅ Відновлення завершено.\nВідновлено: ${res.restored}\nПропущено: ${res.skipped}\nПослуг: ${res.items}`
+            );
+        } catch (e) {
+            console.error('restore error', e);
+            await ctx.reply('🚨 Помилка відновлення. Спробуйте пізніше.');
+        }
     }
 
     // ===== USER MENU HANDLERS =====

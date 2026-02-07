@@ -28,6 +28,7 @@ import {
     ORDERS_REPOSITORY,
 } from '../../common/interfaces';
 import { NotificationService } from '../notifications/notification-strategies';
+import { SheetsService } from '../integrations/sheets/sheets.service';
 
 /**
  * Normalizes phone number by removing non-digit characters
@@ -62,8 +63,19 @@ export class OrdersService {
         @Inject(MAIL_SERVICE) private readonly mail: IMailService,
         private readonly notificationService: NotificationService,
         @Inject(ORDERS_REPOSITORY)
-        private readonly repository: IOrdersRepository
+        private readonly repository: IOrdersRepository,
+        private readonly sheets: SheetsService
     ) {}
+
+    private async tryBackup(publicId: number) {
+        try {
+            await this.sheets.backupOrderByPublicId(publicId);
+        } catch (e) {
+            this.logger.warn(
+                `Backup to Google Sheets failed for order #${publicId}`
+            );
+        }
+    }
 
     /**
      * Permissions:
@@ -134,6 +146,8 @@ export class OrdersService {
             clientPhone: order.clientPhone,
             createdByTgId: createdBy.tgId,
         });
+
+        await this.tryBackup(order.publicId);
 
         return order;
     }
@@ -239,6 +253,8 @@ export class OrdersService {
                 toStatus: input.status,
                 changedByTgId: by.tgId,
             });
+
+            await this.tryBackup(updatedOrder.publicId);
         }
 
         return updatedOrder;
@@ -285,6 +301,8 @@ export class OrdersService {
             pdfBuffer,
             `warranty-${order.publicId}.pdf`
         );
+
+        await this.tryBackup(order.publicId);
 
         // 4. Return order with PDF buffer for Telegram sending
         return { order, pdfBuffer };

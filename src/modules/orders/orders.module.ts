@@ -6,9 +6,16 @@ import { MailModule } from '../mail/mail.module';
 import { PdfModule } from '../pdf/pdf.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ORDERS_REPOSITORY } from '../../common/interfaces';
+import { SheetsModule } from '../integrations/sheets/sheets.module';
 
 @Module({
-    imports: [PrismaModule, PdfModule, MailModule, NotificationsModule],
+    imports: [
+        PrismaModule,
+        PdfModule,
+        MailModule,
+        NotificationsModule,
+        SheetsModule,
+    ],
     providers: [
         OrdersService,
         {
