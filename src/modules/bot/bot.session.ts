@@ -1,6 +1,13 @@
 import type { ServiceType } from '@prisma/client';
 
-export type BotFlow = 'create' | 'search' | 'finalize' | 'checkStatus' | null;
+export type BotFlow =
+    | 'create'
+    | 'search'
+    | 'finalize'
+    | 'checkStatus'
+    | 'edit'
+    | 'editItems'
+    | null;
 
 export type CreateStep =
     | 'phone'
@@ -20,6 +27,13 @@ export type OpenStep = 'openPublicId';
 
 export type CheckStatusStep = 'waitingForOrderId';
 
+export type EditStep =
+    | 'editChoice'
+    | 'editPhone'
+    | 'editEstimate'
+    | 'editEmail'
+    | 'editPhoto';
+
 export interface OrderDraftItem {
     service: ServiceType;
     price: number;
@@ -29,7 +43,13 @@ export interface OrderDraftItem {
 
 export interface BotSessionData {
     flow: BotFlow;
-    step?: CreateStep | SearchStep | FinalizeStep | OpenStep | CheckStatusStep;
+    step?:
+        | CreateStep
+        | SearchStep
+        | FinalizeStep
+        | OpenStep
+        | CheckStatusStep
+        | EditStep;
 
     // create order flow
     photoFileId?: string;
@@ -52,6 +72,9 @@ export interface BotSessionData {
     finalizePublicId?: number;
     finalTotal?: number;
     clientEmail?: string; // client email
+
+    // edit flow
+    editPublicId?: number;
 }
 
 export const DEFAULT_SESSION: BotSessionData = {

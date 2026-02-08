@@ -1,7 +1,11 @@
 import type { Context } from 'telegraf';
 import { BotSessionData, DEFAULT_SESSION } from './bot.session';
 import { OrderStatus } from '@prisma/client';
-import { SERVICE_LABELS, STATUS_LABELS, statusKeyboard } from './keyboards';
+import {
+    SERVICE_LABELS,
+    STATUS_LABELS,
+    orderInlineKeyboard,
+} from './keyboards';
 
 export type BotContext = Context & { session: BotSessionData };
 
@@ -11,6 +15,10 @@ export function ensureSession(ctx: BotContext) {
     if (!ctx.session.items) ctx.session.items = [];
     if (typeof ctx.session.flow === 'undefined') ctx.session.flow = null;
     return ctx.session;
+}
+
+export function resetSession(ctx: BotContext) {
+    (ctx as any).session = { ...DEFAULT_SESSION };
 }
 
 export function isPhoneLike(s: string) {
@@ -82,12 +90,28 @@ export function formatOrderShort(order: any) {
 export async function sendOrderCard(
     ctx: BotContext,
     order: any,
-    withKeyboard = true
+    opts?: {
+        withStatus?: boolean;
+        canEdit?: boolean;
+        canDelete?: boolean;
+    }
 ) {
     const text = formatOrderShort(order);
+    const withStatus =
+        opts?.withStatus !== undefined
+            ? opts.withStatus
+            : order.status !== OrderStatus.DONE;
+    const showEdit = !!opts?.canEdit && order.status !== OrderStatus.DONE;
+    const showDelete = !!opts?.canDelete;
+
     const keyboard =
-        withKeyboard && order.status !== OrderStatus.DONE
-            ? statusKeyboard(order.publicId)
+        withStatus || showEdit || showDelete
+            ? orderInlineKeyboard({
+                  publicId: order.publicId,
+                  showStatus: withStatus && order.status !== OrderStatus.DONE,
+                  showEdit,
+                  showDelete,
+              })
             : undefined;
 
     if (order.photoFileId) {

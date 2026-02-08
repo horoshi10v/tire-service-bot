@@ -391,6 +391,21 @@ export class SheetsService {
         return true;
     }
 
+    async removeOrderFromBackup(publicId: number): Promise<boolean> {
+        const sheet = await this.ensureBackupSheet();
+        const rows = await sheet.getRows();
+        const existing = rows.find(
+            (r: any) =>
+                String(r.get('publicId') ?? '').trim() ===
+                String(publicId)
+        );
+
+        if (!existing) return false;
+
+        await existing.delete();
+        return true;
+    }
+
     private async ensureEmployee(
         tgId: bigint | null,
         name: string | null,

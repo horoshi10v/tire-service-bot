@@ -80,6 +80,107 @@ export function statusKeyboard(publicId: number): InlineKeyboardMarkup {
     };
 }
 
+export function orderInlineKeyboard(params: {
+    publicId: number;
+    showStatus: boolean;
+    showEdit: boolean;
+    showDelete: boolean;
+}): InlineKeyboardMarkup {
+    const rows: InlineKeyboardMarkup['inline_keyboard'] = [];
+
+    if (params.showStatus) {
+        rows.push([
+            {
+                text: STATUS_LABELS.ACCEPTED,
+                callback_data: `st:${params.publicId}:ACCEPTED`,
+            },
+            {
+                text: STATUS_LABELS.IN_PROGRESS,
+                callback_data: `st:${params.publicId}:IN_PROGRESS`,
+            },
+        ]);
+        rows.push([
+            {
+                text: STATUS_LABELS.READY,
+                callback_data: `st:${params.publicId}:READY`,
+            },
+            {
+                text: STATUS_LABELS.DONE,
+                callback_data: `st:${params.publicId}:DONE`,
+            },
+        ]);
+    }
+
+    if (params.showEdit || params.showDelete) {
+        const row: InlineKeyboardMarkup['inline_keyboard'][number] = [];
+        if (params.showEdit) {
+            row.push({
+                text: '✏️ Редагувати',
+                callback_data: `edit:${params.publicId}`,
+            });
+        }
+        if (params.showDelete) {
+            row.push({
+                text: '🗑 Видалити',
+                callback_data: `del:${params.publicId}`,
+            });
+        }
+        rows.push(row);
+    }
+
+    return { inline_keyboard: rows };
+}
+
+export function editMenuKeyboard(publicId: number): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [
+            [
+                {
+                    text: '📞 Телефон',
+                    callback_data: `edit:${publicId}:phone`,
+                },
+                {
+                    text: '🧾 Послуги',
+                    callback_data: `edit:${publicId}:items`,
+                },
+            ],
+            [
+                {
+                    text: '💰 Орієнтовна сума',
+                    callback_data: `edit:${publicId}:estimate`,
+                },
+                {
+                    text: '✉️ Email',
+                    callback_data: `edit:${publicId}:email`,
+                },
+            ],
+            [
+                {
+                    text: '📸 Фото',
+                    callback_data: `edit:${publicId}:photo`,
+                },
+                {
+                    text: '❌ Скасувати',
+                    callback_data: `edit:${publicId}:cancel`,
+                },
+            ],
+        ],
+    };
+}
+
+export function deleteConfirmKeyboard(
+    publicId: number
+): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [
+            [
+                { text: '✅ Видалити', callback_data: `delc:${publicId}` },
+                { text: '❌ Скасувати', callback_data: `delx:${publicId}` },
+            ],
+        ],
+    };
+}
+
 export function staffKeyboard(
     staff: { tgId: bigint; name: string }[]
 ): InlineKeyboardMarkup {

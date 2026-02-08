@@ -16,8 +16,9 @@ import {
     servicesKeyboard,
     SERVICE_LABELS,
     mainMenuKeyboard,
+    deleteConfirmKeyboard,
 } from './keyboards';
-import { OrderStatus, ServiceType } from '@prisma/client';
+import { EmployeeRole, OrderStatus, ServiceType } from '@prisma/client';
 import {
     ensureSession,
     parseIntStrict,
@@ -31,6 +32,12 @@ import { RolesGuard } from '../../common/guards';
 import { WarrantyVerificationService } from '../warranty';
 import { WarrantyVerificationHandler } from './handlers';
 import { SheetsService } from '../integrations/sheets/sheets.service';
+import {
+    handleEditMenuAction,
+    handleEditPhoto,
+    handleEditTextFlow,
+    startEditMenu,
+} from './edit-order.flow';
 
 type BotContext = Context & { session: BotSessionData };
 
@@ -68,6 +75,25 @@ export class BotUpdate {
                 totalPages
             ),
         });
+    }
+
+    private async getCardOptions(ctx: BotContext) {
+        const role = await this.auth.getUserRole(BigInt(ctx.from!.id));
+        return {
+            canEdit:
+                role === EmployeeRole.ADMIN || role === EmployeeRole.MASTER,
+            canDelete: role === EmployeeRole.ADMIN,
+        };
+    }
+
+    private async sendOrderCardForUser(
+        ctx: BotContext,
+        order: any,
+        withStatus = true,
+        opts?: { canEdit: boolean; canDelete: boolean }
+    ) {
+        const resolved = opts ?? (await this.getCardOptions(ctx));
+        await sendOrderCard(ctx, order, { ...resolved, withStatus });
     }
 
     // ---------- start ----------
@@ -138,7 +164,13 @@ export class BotUpdate {
             }
 
             const order = await this.orders.getByPublicId(id);
-            await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
+            const cardOpts = await this.getCardOptions(ctx);
+            await this.sendOrderCardForUser(
+                ctx,
+                order,
+                order.status !== OrderStatus.DONE,
+                cardOpts
+            );
         } catch (e: any) {
             if (e?.status === 404) {
                 await ctx.reply('❌ Замовлення з таким номером не знайдено');
@@ -156,6 +188,69 @@ export class BotUpdate {
         s.flow = 'search';
         s.step = 'phonePart';
         await ctx.reply('Введіть номер телефону (або частину):');
+    }
+
+    @Command('edit')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async edit(@Ctx() ctx: BotContext) {
+        const parts = String((ctx.message as any)?.text || '').split(/\s+/);
+        const id = Number(parts[1]);
+        if (!id) {
+            await ctx.reply('Формат: /edit 123');
+            return;
+        }
+
+        try {
+            await startEditMenu(ctx, this.orders, id);
+        } catch (e: any) {
+            if (e?.status === 404) {
+                await ctx.reply('❌ Замовлення не знайдено');
+                return;
+            }
+            console.error('edit command error', e);
+            await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
+        }
+    }
+
+    @Command('delete')
+    @Roles(UserRole.ADMIN)
+    async delete(@Ctx() ctx: BotContext) {
+        const parts = String((ctx.message as any)?.text || '').split(/\s+/);
+        const id = Number(parts[1]);
+        const confirmed = parts.includes('CONFIRM');
+
+        if (!id) {
+            await ctx.reply('Формат: /delete 123 CONFIRM');
+            return;
+        }
+
+        if (!confirmed) {
+            await ctx.reply(
+                `⚠️ Видалити замовлення #${id}?\n` +
+                    'Підтвердіть командою:\n' +
+                    `/delete ${id} CONFIRM`
+            );
+            return;
+        }
+
+        try {
+            await this.orders.deleteOrder({
+                orderPublicId: id,
+                byTgId: BigInt(ctx.from!.id),
+            });
+            await ctx.reply(`✅ Замовлення #${id} видалено`);
+        } catch (e: any) {
+            if (e?.status === 404) {
+                await ctx.reply('❌ Замовлення не знайдено');
+                return;
+            }
+            if (e?.status === 400) {
+                await ctx.reply(`⚠️ ${e.response?.message || 'Помилка'}`);
+                return;
+            }
+            console.error('delete order error', e);
+            await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
+        }
     }
 
     @Command('backup')
@@ -301,6 +396,14 @@ export class BotUpdate {
         if (!fileId) return;
 
         ctx.session = ensureSession(ctx);
+
+        const cardOpts = await this.getCardOptions(ctx);
+        const handled = await handleEditPhoto(ctx, this.orders, fileId, {
+            ...cardOpts,
+            withStatus: true,
+        });
+        if (handled) return;
+
         ctx.session.flow = 'create';
         ctx.session.step = 'phone';
         ctx.session.photoFileId = fileId;
@@ -343,7 +446,13 @@ export class BotUpdate {
 
             const order = await this.orders.getByPublicId(id);
             await ctx.answerCbQuery();
-            await sendOrderCard(ctx, order, order.status !== OrderStatus.DONE);
+            const cardOpts = await this.getCardOptions(ctx);
+            await this.sendOrderCardForUser(
+                ctx,
+                order,
+                order.status !== OrderStatus.DONE,
+                cardOpts
+            );
         } catch (e: any) {
             await ctx.answerCbQuery();
             if (e?.status === 404) {
@@ -355,12 +464,90 @@ export class BotUpdate {
         }
     }
 
+    // ---------- edit / delete from order card ----------
+    @Action(/^edit:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async onEditAction(@Ctx() ctx: BotContext) {
+        const data = String((ctx.callbackQuery as any).data);
+        const [, publicIdStr, action] = data.split(':');
+        const publicId = Number(publicIdStr);
+        if (!publicId) return ctx.answerCbQuery();
+
+        await ctx.answerCbQuery();
+
+        if (!action) {
+            try {
+                await startEditMenu(ctx, this.orders, publicId);
+            } catch (e: any) {
+                if (e?.status === 404) {
+                    await ctx.reply('❌ Замовлення не знайдено');
+                    return;
+                }
+                console.error('edit menu error', e);
+                await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
+            }
+            return;
+        }
+
+        await handleEditMenuAction(ctx, action, publicId);
+    }
+
+    @Action(/^del:/)
+    @Roles(UserRole.ADMIN)
+    async onDeleteAsk(@Ctx() ctx: BotContext) {
+        const data = String((ctx.callbackQuery as any).data);
+        const [, publicIdStr] = data.split(':');
+        const publicId = Number(publicIdStr);
+        if (!publicId) return ctx.answerCbQuery();
+
+        await ctx.answerCbQuery();
+        await ctx.reply(`⚠️ Видалити замовлення #${publicId}?`, {
+            reply_markup: deleteConfirmKeyboard(publicId),
+        });
+    }
+
+    @Action(/^delc:/)
+    @Roles(UserRole.ADMIN)
+    async onDeleteConfirm(@Ctx() ctx: BotContext) {
+        const data = String((ctx.callbackQuery as any).data);
+        const [, publicIdStr] = data.split(':');
+        const publicId = Number(publicIdStr);
+        if (!publicId) return ctx.answerCbQuery();
+
+        await ctx.answerCbQuery();
+        try {
+            await this.orders.deleteOrder({
+                orderPublicId: publicId,
+                byTgId: BigInt(ctx.from!.id),
+            });
+            await ctx.reply(`✅ Замовлення #${publicId} видалено`);
+        } catch (e: any) {
+            if (e?.status === 404) {
+                await ctx.reply('❌ Замовлення не знайдено');
+                return;
+            }
+            if (e?.status === 400) {
+                await ctx.reply(`⚠️ ${e.response?.message || 'Помилка'}`);
+                return;
+            }
+            console.error('delete order error', e);
+            await ctx.reply('🚨 Помилка. Спробуйте пізніше.');
+        }
+    }
+
+    @Action(/^delx:/)
+    @Roles(UserRole.ADMIN)
+    async onDeleteCancel(@Ctx() ctx: BotContext) {
+        await ctx.answerCbQuery();
+        await ctx.reply('Скасовано');
+    }
+
     // ---------- services selection ----------
     @Action(/^svc:/)
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async onServiceToggle(@Ctx() ctx: BotContext) {
         const s = ensureSession(ctx);
-        if (s.flow !== 'create') return;
+        if (s.flow !== 'create' && s.flow !== 'editItems') return;
 
         const data = String((ctx.callbackQuery as any).data);
         const arg = data.split(':')[1];
@@ -455,7 +642,8 @@ export class BotUpdate {
             }
 
             await ctx.answerCbQuery('Ок');
-            await sendOrderCard(ctx, updated, true);
+            const cardOpts = await this.getCardOptions(ctx);
+            await this.sendOrderCardForUser(ctx, updated, true, cardOpts);
 
             const adminIds = await this.auth.getActiveAdminTgIds();
             await notifyAllAdmins(
@@ -558,6 +746,15 @@ export class BotUpdate {
         }
 
         // Employee-only flows below this point
+        const cardOpts = await this.getCardOptions(ctx);
+        if (
+            await handleEditTextFlow(ctx, this.orders, {
+                ...cardOpts,
+                withStatus: true,
+            })
+        ) {
+            return;
+        }
 
         // 1) обработка "📌 Відкрити замовлення" (ввод id)
         if (s.step === 'openPublicId') {
@@ -571,10 +768,11 @@ export class BotUpdate {
 
             try {
                 const order = await this.orders.getByPublicId(id);
-                await sendOrderCard(
+                await this.sendOrderCardForUser(
                     ctx,
                     order,
-                    order.status !== OrderStatus.DONE
+                    order.status !== OrderStatus.DONE,
+                    cardOpts
                 );
             } catch (e: any) {
                 if (e?.status === 404) {
@@ -607,7 +805,12 @@ export class BotUpdate {
                 }
 
                 for (const o of list) {
-                    await sendOrderCard(ctx, o, o.status !== OrderStatus.DONE);
+                    await this.sendOrderCardForUser(
+                        ctx,
+                        o,
+                        o.status !== OrderStatus.DONE,
+                        cardOpts
+                    );
                 }
             } catch (e: any) {
                 console.error('Search error', e);
@@ -681,7 +884,7 @@ export class BotUpdate {
                     s.step = undefined;
                     s.clientEmail = undefined;
 
-                    await sendOrderCard(ctx, order, false);
+                    await this.sendOrderCardForUser(ctx, order, false, cardOpts);
                 } catch (e) {
                     console.error('finalize error', e);
                     await ctx.reply('🚨 Помилка при видачі замовлення');

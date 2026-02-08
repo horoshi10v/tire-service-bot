@@ -44,6 +44,27 @@ export type FinalizeOrderResult = {
     pdfBuffer: Buffer;
 };
 
+export type UpdateOrderInput = {
+    orderPublicId: number;
+    byTgId: bigint;
+    clientPhone?: string;
+    estimateTotal?: number | null;
+    clientEmail?: string | null;
+    photoFileId?: string | null;
+};
+
+export type ReplaceItemsInput = {
+    orderPublicId: number;
+    byTgId: bigint;
+    items: CreateOrderInput['items'];
+    estimateTotal?: number | null;
+};
+
+export type DeleteOrderInput = {
+    orderPublicId: number;
+    byTgId: bigint;
+};
+
 export type SearchOrdersInput = {
     phonePart: string;
     includeDone?: boolean;

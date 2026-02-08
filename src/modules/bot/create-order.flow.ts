@@ -1,6 +1,6 @@
 import { OrdersService } from '../orders/orders.service';
 import { AuthService } from '../auth/auth.service';
-import { ServiceType } from '@prisma/client';
+import { EmployeeRole, ServiceType } from '@prisma/client';
 import { servicesKeyboard, SERVICE_LABELS, staffKeyboard } from './keyboards';
 import {
     BotContext,
@@ -139,6 +139,11 @@ export async function handleCreateOrderFlow(
         await notifyAllAdmins(ctx, adminIds, created, '🆕 Нове замовлення');
 
         ctx.session = { ...DEFAULT_SESSION };
-        await sendOrderCard(ctx, created, true);
+        const role = await auth.getUserRole(tgId);
+        await sendOrderCard(ctx, created, {
+            withStatus: true,
+            canEdit: role === EmployeeRole.ADMIN || role === EmployeeRole.MASTER,
+            canDelete: role === EmployeeRole.ADMIN,
+        });
     }
 }

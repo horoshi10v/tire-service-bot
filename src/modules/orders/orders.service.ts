@@ -5,9 +5,12 @@ import {
     AddItemsInput,
     ChangeStatusInput,
     CreateOrderInput,
+    DeleteOrderInput,
     FinalizeOrderInput,
     FinalizeOrderResult,
+    ReplaceItemsInput,
     SearchOrdersInput,
+    UpdateOrderInput,
 } from './orders.types';
 import { OrderStateMachine } from '../../common/domain';
 import {
@@ -189,6 +192,134 @@ export class OrdersService {
             data: { estimateTotal: sum._sum.price ?? null },
             include: { items: true },
         });
+    }
+
+    async updateOrder(input: UpdateOrderInput) {
+        await this.requireRole(input.byTgId, [
+            EmployeeRole.MASTER,
+            EmployeeRole.ADMIN,
+        ]);
+
+        const order = await this.prisma.order.findUnique({
+            where: { publicId: input.orderPublicId },
+            select: { id: true, status: true },
+        });
+        if (!order) throw new OrderNotFoundException(input.orderPublicId);
+        if (order.status === OrderStatus.DONE)
+            throw new OrderAlreadyDoneException(input.orderPublicId);
+
+        const data: any = {};
+        if (input.clientPhone !== undefined) {
+            const phone = normalizePhone(input.clientPhone);
+            if (!phone)
+                throw new ValidationException(
+                    "Телефон клієнта обов'язковий"
+                );
+            data.clientPhone = phone;
+        }
+        if (input.estimateTotal !== undefined) {
+            data.estimateTotal = input.estimateTotal;
+        }
+        if (input.clientEmail !== undefined) {
+            data.clientEmail = input.clientEmail;
+        }
+        if (input.photoFileId !== undefined) {
+            data.photoFileId = input.photoFileId;
+        }
+
+        const updated = await this.prisma.order.update({
+            where: { id: order.id },
+            data,
+            include: {
+                items: true,
+                acceptedBy: { select: { name: true, tgId: true } },
+                createdBy: { select: { name: true, tgId: true } },
+                assignedTo: { select: { name: true, tgId: true } },
+            },
+        });
+
+        await this.tryBackup(updated.publicId);
+        return updated;
+    }
+
+    async replaceItems(input: ReplaceItemsInput) {
+        await this.requireRole(input.byTgId, [
+            EmployeeRole.MASTER,
+            EmployeeRole.ADMIN,
+        ]);
+
+        const order = await this.prisma.order.findUnique({
+            where: { publicId: input.orderPublicId },
+            select: { id: true, status: true, createdAt: true },
+        });
+        if (!order) throw new OrderNotFoundException(input.orderPublicId);
+        if (order.status === OrderStatus.DONE)
+            throw new OrderAlreadyDoneException(input.orderPublicId);
+
+        if (!input.items?.length)
+            throw new ValidationException('Потрібна хоча б одна послуга');
+
+        const baseDate = order.createdAt ?? new Date();
+
+        await this.prisma.$transaction([
+            this.prisma.orderItem.deleteMany({
+                where: { orderId: order.id },
+            }),
+            this.prisma.orderItem.createMany({
+                data: input.items.map((i) => ({
+                    orderId: order.id,
+                    service: i.service,
+                    price: Math.trunc(i.price),
+                    comment: i.comment ?? null,
+                    warrantyDays: i.warrantyDays ?? null,
+                    warrantyUntil: calcWarrantyUntil(baseDate, i.warrantyDays),
+                })),
+            }),
+        ]);
+
+        const sum = await this.prisma.orderItem.aggregate({
+            where: { orderId: order.id },
+            _sum: { price: true },
+        });
+
+        const estimateTotal =
+            input.estimateTotal !== undefined
+                ? input.estimateTotal
+                : sum._sum.price ?? null;
+
+        const updated = await this.prisma.order.update({
+            where: { id: order.id },
+            data: { estimateTotal },
+            include: {
+                items: true,
+                acceptedBy: { select: { name: true, tgId: true } },
+                createdBy: { select: { name: true, tgId: true } },
+                assignedTo: { select: { name: true, tgId: true } },
+            },
+        });
+
+        await this.tryBackup(updated.publicId);
+        return updated;
+    }
+
+    async deleteOrder(input: DeleteOrderInput) {
+        await this.requireRole(input.byTgId, [EmployeeRole.ADMIN]);
+
+        const order = await this.prisma.order.findUnique({
+            where: { publicId: input.orderPublicId },
+            select: { id: true, publicId: true },
+        });
+        if (!order) throw new OrderNotFoundException(input.orderPublicId);
+
+        await this.prisma.order.delete({ where: { id: order.id } });
+
+        try {
+            await this.sheets.removeOrderFromBackup(order.publicId);
+        } catch {
+            // ignore backup cleanup errors
+        }
+
+        return { publicId: order.publicId };
     }
 
     async changeStatus(input: ChangeStatusInput) {
