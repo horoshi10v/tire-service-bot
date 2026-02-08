@@ -57,7 +57,7 @@ It efficiently handles the entire lifecycle of a service order, from creation to
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/tire-service-bot.git
+   git clone https://github.com/horoshi10v/tire-service-bot
    cd tire-service-bot
    ```
 
@@ -67,6 +67,7 @@ It efficiently handles the entire lifecycle of a service order, from creation to
    ```
 
 3. **Configure Environment Variables**
+   
    Copy the example configuration file and update it with your credentials:
    ```bash
    cp .env.example .env
@@ -144,16 +145,19 @@ VALUES (YOUR_TELEGRAM_ID, 'Admin Name', 'ADMIN', true);
 
 ```bash
 src/
-├── common/           # Shared guards, interfaces, and domain logic
-├── config/           # Environment configuration
+├── common/             # Domain logic, events, guards, & exceptions
+├── config/             # Environment configuration
 ├── modules/
-│   ├── auth/         # Auth services
-│   ├── bot/          # Main Telegram bot logic (Scenes, Wizards, PC)
-│   ├── integrations/ # External services (Google Sheets)
-│   ├── order/        # Order domain logic & repository
-│   ├── pdf/          # PDF generation services
-│   └── warranty/     # Warranty verification logic
-└── prisma/           # Database schema
+│   ├── auth/           # Authentication service
+│   ├── bot/            # Telegram bot logic (Commands, Handlers, Flows)
+│   ├── integrations/   # External APIs (Google Sheets)
+│   ├── mail/           # Email sending service
+│   ├── notifications/  # Notification strategies
+│   ├── orders/         # Order business logic & CRUD
+│   ├── pdf/            # PDF generation (Fonts, Icons, Generators)
+│   └── warranty/       # Warranty verification logic
+├── prisma/             # Database connection & schema
+└── main.ts             # Application entry point
 ```
 
 ## 📄 License
