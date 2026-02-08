@@ -116,7 +116,7 @@ export class OrdersService {
 
         const now = new Date();
 
-        const order = await this.prisma.order.create({
+        const createData = {
             data: {
                 clientPhone,
                 status: OrderStatus.ACCEPTED,
@@ -141,7 +141,19 @@ export class OrdersService {
                 acceptedBy: { select: { name: true, tgId: true } },
                 createdBy: { select: { name: true, tgId: true } },
             },
-        });
+        } as const;
+
+        let order;
+        try {
+            order = await this.prisma.order.create(createData);
+        } catch (e: any) {
+            if (e?.code === 'P2002' && e?.meta?.modelName === 'Order') {
+                await this.syncOrderPublicIdSequence();
+                order = await this.prisma.order.create(createData);
+            } else {
+                throw e;
+            }
+        }
 
         await this.notificationService.notifyOrderCreated({
             orderId: order.id,
@@ -153,6 +165,19 @@ export class OrdersService {
         await this.tryBackup(order.publicId);
 
         return order;
+    }
+
+    private async syncOrderPublicIdSequence() {
+        const res = (await this.prisma.$queryRawUnsafe(
+            `SELECT pg_get_serial_sequence('"Order"', 'publicId') as seq`
+        )) as Array<{ seq: string | null }>;
+
+        const seq = res?.[0]?.seq;
+        if (!seq) return;
+
+        await this.prisma.$executeRawUnsafe(
+            `SELECT setval('${seq}', (SELECT COALESCE(MAX("publicId"), 0) FROM "Order"))`
+        );
     }
 
     async addItems(input: AddItemsInput) {

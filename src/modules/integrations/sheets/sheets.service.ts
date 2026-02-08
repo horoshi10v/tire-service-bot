@@ -624,6 +624,25 @@ export class SheetsService {
             `Restore done: restored=${restored}, skipped=${skipped}, items=${itemsTotal}`
         );
 
+        try {
+            await this.syncOrderPublicIdSequence();
+        } catch (e) {
+            this.log.warn('Failed to sync Order publicId sequence');
+        }
+
         return { restored, skipped, items: itemsTotal };
+    }
+
+    private async syncOrderPublicIdSequence() {
+        const res = (await this.prisma.$queryRawUnsafe(
+            `SELECT pg_get_serial_sequence('"Order"', 'publicId') as seq`
+        )) as Array<{ seq: string | null }>;
+
+        const seq = res?.[0]?.seq;
+        if (!seq) return;
+
+        await this.prisma.$executeRawUnsafe(
+            `SELECT setval('${seq}', (SELECT COALESCE(MAX("publicId"), 0) FROM "Order"))`
+        );
     }
 }
