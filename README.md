@@ -1,98 +1,168 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 🚗 Tire Service Bot
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+<div align="center">
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+![NestJS](https://img.shields.io/badge/NestJS-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)
 
-## Description
+**A comprehensive Telegram Bot for managing Tire Service workflows.**  
+*Developed for a service station in Dnipro, Ukraine 🇺🇦*
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+</div>
 
-## Project setup
+---
 
+## 📖 Overview
+
+This bot is designed to automate and streamline the operations of a tire service station. It includes a robust order management system, role-based access control for employees (Admins, Masters), and customer-facing features like warranty verification via QR codes.
+
+It efficiently handles the entire lifecycle of a service order, from creation to completion, generating PDF warranty certificates, and tracking performance statistics.
+
+## ✨ Key Features
+
+- **Order Management**: Create, track, and update service orders in real-time.
+- **Role-Based Access Control (RBAC)**:
+  - **ADMIN**: Full system control, analytics, and order management.
+  - **MASTER**: Manage assigned orders and view personal stats.
+  - **USER (Customer)**: Verify warranties and check current order status.
+- **Warranty Verification**: Generate unique QR codes for orders. Customers can scan to verify warranty validity instantly.
+- **PDF Generation**: Automatic generation of warranty certificates (PDF) with sending via Email/Telegram.
+- **Google Sheets Integration**: Sync staff data and backup order history automatically.
+- **Search & Reporting**: Advanced search by phone number and detailed statistics summaries.
+
+## 🛠️ Tech Stack
+
+- **Framework**: [NestJS](https://nestjs.com/) (Node.js)
+- **Language**: TypeScript
+- **Database**: PostgreSQL with [Prisma ORM](https://www.prisma.io/)
+- **Bot API**: `telegraf`
+- **PDF Generation**: `pdf-lib`
+- **Integrations**: Google Sheets API (`google-spreadsheet`), Nodemailer
+- **Containerization**: Docker & Docker Compose
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js (v20+)
+- Docker & Docker Compose
+- PostgreSQL (if running locally without Docker)
+- A Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- Google Service Account Credentials (for Sheets integration)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-username/tire-service-bot.git
+   cd tire-service-bot
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure Environment Variables**
+   Copy the example configuration file and update it with your credentials:
+   ```bash
+   cp .env.example .env
+   ```
+   *Make sure to fill in your Telegram Bot Token, Database URL, and Google Credentials.*
+
+### Running the Application
+
+#### Development Mode
 ```bash
-$ npm install
+# Start the database (if using Docker for DB only)
+docker-compose up db -d
+
+# Run migrations
+npx prisma migrate dev
+
+# Start the app
+npm run start:dev
 ```
 
-## Compile and run the project
-
+#### Production Mode (Docker)
 ```bash
-# development
-$ npm run start
+docker-compose up -d --build
+```
+The application will start, and the bot will be ready to accept commands.
 
-# watch mode
-$ npm run start:dev
+## 📱 Bot Commands
 
-# production mode
-$ npm run start:prod
+### For Staff (Admin/Master)
+
+**Menu Buttons:**
+
+| Button | Description |
+|--------|-------------|
+| `🆕 Новий` | Create a new order (starts by uploading a photo) |
+| `🔍 Пошук` | Interactive search by phone number |
+| `📌 Відкрити замовлення` | Open an order by ID |
+| `📊 Зведення` | Show current order statistics |
+| `🟡 Прийняті` | List orders with status **Accepted** |
+| `🔵 В роботі` | List orders with status **In Progress** |
+| `🟢 Готові` | List orders with status **Ready** |
+| `⚫ Видані` | List orders with status **Done** |
+
+**Text Commands:**
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/start` | Open the main menu | All |
+| `/active <id>` | Open a specific order by ID | Master, Admin |
+| `/search` | Search for an order by phone number | Master, Admin |
+| `/edit <id>` | Edit an existing order | Master, Admin |
+| `/delete <id> CONFIRM` | Delete an order permanently | **Admin only** |
+| `/backup` | Backup all orders to Google Sheets | **Admin only** |
+| `/sync_staff` | Sync staff list from Google Sheets | **Admin only** |
+| `/restore CONFIRM` | Restore orders from Backup sheet | **Admin only** |
+
+### For Customers
+
+| Command / Button | Description |
+|------------------|-------------|
+| `/start verify_<token>` | Verify a warranty certificate (usually scanned via QR) |
+| `📋 Статус замовлення` | Check the status of your current order |
+
+## 🔐 Role Management
+
+Roles (`ADMIN`, `MASTER`) are managed in the database or synchronized via the **Google Sheets** integration.
+
+Initially, you may need to insert the first Admin manually into the database:
+```sql
+INSERT INTO "Employee" ("tgId", "name", "role", "isActive")
+VALUES (YOUR_TELEGRAM_ID, 'Admin Name', 'ADMIN', true);
 ```
 
-## Run tests
+## 🏗️ Project Structure
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+src/
+├── common/           # Shared guards, interfaces, and domain logic
+├── config/           # Environment configuration
+├── modules/
+│   ├── auth/         # Auth services
+│   ├── bot/          # Main Telegram bot logic (Scenes, Wizards, PC)
+│   ├── integrations/ # External services (Google Sheets)
+│   ├── order/        # Order domain logic & repository
+│   ├── pdf/          # PDF generation services
+│   └── warranty/     # Warranty verification logic
+└── prisma/           # Database schema
 ```
 
-## Deployment
+## 📄 License
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+This project is licensed under the **MIT License**.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+---
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+<div align="center">
+  <sub>Built with ❤️ for Dnipro Tire Services</sub>
+</div>
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
