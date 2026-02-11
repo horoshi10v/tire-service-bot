@@ -28,6 +28,7 @@ const BACKUP_HEADERS = [
     'estimateTotal',
     'finalTotal',
     'photoFileId',
+    'photoFileIdsJson',
     'createdAt',
     'updatedAt',
     'doneAt',
@@ -182,6 +183,9 @@ export class SheetsService {
                     : null,
             }))
         );
+        const photoFileIdsJson = JSON.stringify(
+            (order.photos ?? []).map((p: any) => p.fileId)
+        );
 
         return {
             backupVersion: BACKUP_VERSION,
@@ -214,6 +218,7 @@ export class SheetsService {
                     ? ''
                     : String(order.finalTotal),
             photoFileId: order.photoFileId ?? '',
+            photoFileIdsJson,
             createdAt: order.createdAt
                 ? new Date(order.createdAt).toISOString()
                 : '',
@@ -233,6 +238,7 @@ export class SheetsService {
                 acceptedBy: { select: { name: true, tgId: true, role: true } },
                 createdBy: { select: { name: true, tgId: true, role: true } },
                 assignedTo: { select: { name: true, tgId: true, role: true } },
+                photos: true,
             },
         });
     }
@@ -338,6 +344,7 @@ export class SheetsService {
                 acceptedBy: { select: { name: true, tgId: true, role: true } },
                 createdBy: { select: { name: true, tgId: true, role: true } },
                 assignedTo: { select: { name: true, tgId: true, role: true } },
+                photos: true,
             },
             orderBy: { createdAt: 'asc' },
         });
@@ -495,7 +502,7 @@ export class SheetsService {
                   )
                 : null;
 
-            let items: Array<{
+        let items: Array<{
                 service: ServiceType;
                 price: number;
                 comment: string | null;
@@ -503,6 +510,7 @@ export class SheetsService {
                 warrantyUntil: Date | null;
                 createdAt?: Date | null;
             }> = [];
+        let photoIds: string[] = [];
 
             try {
                 const raw = row.get('itemsJson');
@@ -537,6 +545,17 @@ export class SheetsService {
             } catch {
                 // ignore malformed itemsJson
             }
+            try {
+                const raw = row.get('photoFileIdsJson');
+                const parsed = JSON.parse(String(raw || '[]'));
+                if (Array.isArray(parsed)) {
+                    photoIds = parsed
+                        .map((v: any) => String(v ?? '').trim())
+                        .filter((v: string) => v);
+                }
+            } catch {
+                // ignore malformed photoFileIdsJson
+            }
 
             itemsTotal += items.length;
 
@@ -554,8 +573,9 @@ export class SheetsService {
                         String(row.get('clientEmail') ?? '').trim() || null,
                     estimateTotal: parseNumber(row.get('estimateTotal')),
                     finalTotal: parseNumber(row.get('finalTotal')),
-                    photoFileId:
-                        String(row.get('photoFileId') ?? '').trim() || null,
+                    photoFileId: photoIds[0]
+                        ? photoIds[0]
+                        : String(row.get('photoFileId') ?? '').trim() || null,
                     createdAt,
                     doneAt,
                     acceptedBy: { connect: { id: acceptedById } },
@@ -580,6 +600,15 @@ export class SheetsService {
                             createdAt: i.createdAt ?? createdAt,
                         })),
                     },
+                    ...(photoIds.length
+                        ? {
+                              photos: {
+                                  create: photoIds.map((fileId) => ({
+                                      fileId,
+                                  })),
+                              },
+                          }
+                        : {}),
                 },
                 update: {
                     status,
@@ -588,8 +617,9 @@ export class SheetsService {
                         String(row.get('clientEmail') ?? '').trim() || null,
                     estimateTotal: parseNumber(row.get('estimateTotal')),
                     finalTotal: parseNumber(row.get('finalTotal')),
-                    photoFileId:
-                        String(row.get('photoFileId') ?? '').trim() || null,
+                    photoFileId: photoIds[0]
+                        ? photoIds[0]
+                        : String(row.get('photoFileId') ?? '').trim() || null,
                     doneAt,
                     acceptedBy: { connect: { id: acceptedById } },
                     createdBy: { connect: { id: createdById } },
@@ -614,6 +644,16 @@ export class SheetsService {
                             createdAt: i.createdAt ?? createdAt,
                         })),
                     },
+                    ...(photoIds.length
+                        ? {
+                              photos: {
+                                  deleteMany: {},
+                                  create: photoIds.map((fileId) => ({
+                                      fileId,
+                                  })),
+                              },
+                          }
+                        : { photos: { deleteMany: {} } }),
                 },
             });
 

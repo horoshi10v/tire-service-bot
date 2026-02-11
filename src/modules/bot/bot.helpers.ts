@@ -114,11 +114,31 @@ export async function sendOrderCard(
               })
             : undefined;
 
+    const photos = Array.isArray(order.photos) ? order.photos : [];
+    if (photos.length > 1) {
+        await ctx.replyWithMediaGroup(
+            photos.map((p: any) => ({
+                type: 'photo',
+                media: p.fileId,
+            }))
+        );
+        await ctx.reply(text, { reply_markup: keyboard });
+        return;
+    }
+    if (photos.length === 1) {
+        await ctx.replyWithPhoto(photos[0].fileId, {
+            caption: text,
+            reply_markup: keyboard,
+        });
+        return;
+    }
+
     if (order.photoFileId) {
         await ctx.replyWithPhoto(order.photoFileId, {
             caption: text,
             reply_markup: keyboard,
         });
+        return;
     } else {
         await ctx.reply(text, { reply_markup: keyboard });
     }

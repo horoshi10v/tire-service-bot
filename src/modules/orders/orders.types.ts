@@ -4,6 +4,7 @@ import { OrderWithRelations } from '../../common/interfaces';
 export type CreateOrderInput = {
     clientPhone: string;
     photoFileId?: string | null;
+    photoFileIds?: string[];
 
     // tgId mast be MASTER or ADMIN
     acceptedByTgId: bigint;
@@ -51,6 +52,7 @@ export type UpdateOrderInput = {
     estimateTotal?: number | null;
     clientEmail?: string | null;
     photoFileId?: string | null;
+    photoFileIds?: string[] | null;
 };
 
 export type ReplaceItemsInput = {

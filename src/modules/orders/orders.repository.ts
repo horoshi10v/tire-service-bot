@@ -11,6 +11,7 @@ import {
 export class OrdersRepository implements IOrdersRepository {
     private readonly include = {
         items: true,
+        photos: true,
         acceptedBy: { select: { name: true, tgId: true } },
         createdBy: { select: { name: true, tgId: true } },
         assignedTo: { select: { name: true, tgId: true } },

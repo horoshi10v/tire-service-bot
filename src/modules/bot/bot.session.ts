@@ -53,6 +53,7 @@ export interface BotSessionData {
 
     // create order flow
     photoFileId?: string;
+    photoFileIds?: string[];
     phone?: string;
 
     acceptedByName?: string;

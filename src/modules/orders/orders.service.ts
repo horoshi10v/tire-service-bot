@@ -116,12 +116,19 @@ export class OrdersService {
 
         const now = new Date();
 
+        const photoIds =
+            input.photoFileIds?.length
+                ? input.photoFileIds
+                : input.photoFileId
+                  ? [input.photoFileId]
+                  : [];
+
         const createData = {
             data: {
                 clientPhone,
                 status: OrderStatus.ACCEPTED,
                 estimateTotal: input.estimateTotal ?? null,
-                photoFileId: input.photoFileId ?? null,
+                photoFileId: photoIds[0] ?? null,
 
                 acceptedBy: { connect: { id: acceptedBy.id } },
                 createdBy: { connect: { id: createdBy.id } },
@@ -135,9 +142,19 @@ export class OrdersService {
                         warrantyUntil: calcWarrantyUntil(now, i.warrantyDays),
                     })),
                 },
+                ...(photoIds.length
+                    ? {
+                          photos: {
+                              create: photoIds.map((fileId) => ({
+                                  fileId,
+                              })),
+                          },
+                      }
+                    : {}),
             },
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: { select: { name: true, tgId: true } },
                 createdBy: { select: { name: true, tgId: true } },
             },
@@ -215,7 +232,7 @@ export class OrdersService {
         return this.prisma.order.update({
             where: { id: order.id },
             data: { estimateTotal: sum._sum.price ?? null },
-            include: { items: true },
+            include: { items: true, photos: true },
         });
     }
 
@@ -252,18 +269,63 @@ export class OrdersService {
             data.photoFileId = input.photoFileId;
         }
 
-        const updated = await this.prisma.order.update({
+        const photoIds =
+            input.photoFileIds !== undefined
+                ? input.photoFileIds ?? []
+                : input.photoFileId !== undefined
+                  ? input.photoFileId
+                      ? [input.photoFileId]
+                      : []
+                  : null;
+
+        let updated;
+        if (photoIds !== null) {
+            const ops: any[] = [
+                this.prisma.order.update({
+                    where: { id: order.id },
+                    data: {
+                        ...data,
+                        photoFileId: photoIds[0] ?? null,
+                    },
+                }),
+                this.prisma.orderPhoto.deleteMany({
+                    where: { orderId: order.id },
+                }),
+            ];
+
+            if (photoIds.length) {
+                ops.push(
+                    this.prisma.orderPhoto.createMany({
+                        data: photoIds.map((fileId) => ({
+                            orderId: order.id,
+                            fileId,
+                        })),
+                    })
+                );
+            }
+
+            await this.prisma.$transaction(ops);
+        } else {
+            await this.prisma.order.update({
+                where: { id: order.id },
+                data,
+            });
+        }
+
+        updated = await this.prisma.order.findUnique({
             where: { id: order.id },
-            data,
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: { select: { name: true, tgId: true } },
                 createdBy: { select: { name: true, tgId: true } },
                 assignedTo: { select: { name: true, tgId: true } },
             },
         });
 
-        await this.tryBackup(updated.publicId);
+        if (updated) {
+            await this.tryBackup(updated.publicId);
+        }
         return updated;
     }
 
@@ -317,6 +379,7 @@ export class OrdersService {
             data: { estimateTotal },
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: { select: { name: true, tgId: true } },
                 createdBy: { select: { name: true, tgId: true } },
                 assignedTo: { select: { name: true, tgId: true } },
@@ -396,6 +459,7 @@ export class OrdersService {
             where: { id: order.id },
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: { select: { name: true, tgId: true } },
                 assignedTo: { select: { name: true, tgId: true } },
             },
@@ -429,6 +493,7 @@ export class OrdersService {
             },
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: true,
                 createdBy: true,
                 assignedTo: true,
@@ -482,6 +547,7 @@ export class OrdersService {
             take: Math.min(input.limit ?? 20, 50),
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: { select: { name: true, tgId: true } },
             },
         });
@@ -492,6 +558,7 @@ export class OrdersService {
             where: { publicId },
             include: {
                 items: true,
+                photos: true,
                 acceptedBy: { select: { name: true, tgId: true } },
                 createdBy: { select: { name: true, tgId: true } },
             },
@@ -515,6 +582,7 @@ export class OrdersService {
                 take: pageSize,
                 include: {
                     items: true,
+                    photos: true,
                     acceptedBy: { select: { name: true, tgId: true } },
                 },
             }),

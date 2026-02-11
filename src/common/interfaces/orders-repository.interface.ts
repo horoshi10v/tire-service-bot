@@ -1,4 +1,10 @@
-import { Order, OrderItem, OrderStatus, Prisma } from '@prisma/client';
+import {
+    Order,
+    OrderItem,
+    OrderPhoto,
+    OrderStatus,
+    Prisma,
+} from '@prisma/client';
 
 /**
  * DIP (Dependency Inversion Principle)
@@ -7,6 +13,7 @@ import { Order, OrderItem, OrderStatus, Prisma } from '@prisma/client';
 
 export type OrderWithRelations = Order & {
     items: OrderItem[];
+    photos?: OrderPhoto[];
     acceptedBy: { name: string | null; tgId: bigint } | null;
     createdBy: { name: string | null; tgId: bigint } | null;
     assignedTo: { name: string | null; tgId: bigint } | null;

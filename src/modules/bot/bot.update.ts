@@ -404,8 +404,24 @@ export class BotUpdate {
         });
         if (handled) return;
 
+        // If order creation already started, just append photo
+        if (ctx.session.flow === 'create' && ctx.session.step === 'phone') {
+            ctx.session.photoFileIds ??= [];
+            if (!ctx.session.photoFileIds.includes(fileId)) {
+                ctx.session.photoFileIds.push(fileId);
+            }
+            ctx.session.photoFileId = ctx.session.photoFileIds[0];
+            return;
+        }
+
+        if (ctx.session.flow === 'create' && ctx.session.step !== 'phone') {
+            // creation already in progress, ignore extra photos
+            return;
+        }
+
         ctx.session.flow = 'create';
         ctx.session.step = 'phone';
+        ctx.session.photoFileIds = [fileId];
         ctx.session.photoFileId = fileId;
         ctx.session.phone = undefined;
         ctx.session.acceptedByName = undefined;

@@ -124,6 +124,7 @@ export async function handleCreateOrderFlow(
         const created = await orders.createOrder({
             clientPhone: s.phone!,
             photoFileId: s.photoFileId!,
+            photoFileIds: s.photoFileIds ?? [],
             acceptedByTgId: s.acceptedByTgId!, // selected master
             createdByTgId: tgId,
             items: s.items.map((i) => ({
