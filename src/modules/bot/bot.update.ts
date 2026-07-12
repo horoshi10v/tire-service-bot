@@ -22,6 +22,7 @@ import {
     periodStatisticsKeyboard,
     storageLotTypeKeyboard,
     storageLotsKeyboard,
+    storageMenuKeyboard,
 } from './keyboards';
 import { EmployeeRole, OrderStatus, ServiceType } from '@prisma/client';
 import {
@@ -539,15 +540,13 @@ export class BotUpdate {
         await this.replyPeriodStatistics(ctx, from, title);
     }
 
-    @Hears('📦 На зберіганні')
+    @Hears('📦 Зберігання')
     @Roles(UserRole.MASTER, UserRole.ADMIN)
-    async listStorage(@Ctx() ctx: BotContext) {
-        await this.showStatusList(ctx, OrderStatus.STORAGE, 1);
+    async storageMenu(@Ctx() ctx: BotContext) {
+        await ctx.reply('📦 Зберігання:', { reply_markup: storageMenuKeyboard() });
     }
 
-    @Hears('➕ Нове зберігання')
-    @Roles(UserRole.MASTER, UserRole.ADMIN)
-    async newStorageLot(@Ctx() ctx: BotContext) {
+    private async startNewStorageLot(ctx: BotContext) {
         const s = ensureSession(ctx);
         s.flow = 'storageLot';
         s.step = 'storageLotPhone';
@@ -555,10 +554,20 @@ export class BotUpdate {
         await ctx.reply('Введіть номер телефону клієнта:');
     }
 
-    @Hears('🗄 Лоты хранения')
+    @Action(/^storagemenu:/)
     @Roles(UserRole.MASTER, UserRole.ADMIN)
-    async listStorageLots(@Ctx() ctx: BotContext) {
-        await this.showStorageLots(ctx, 1);
+    async onStorageMenu(@Ctx() ctx: BotContext) {
+        const option = String((ctx.callbackQuery as any).data).split(':')[1];
+        await ctx.answerCbQuery();
+        if (option === 'orders') {
+            await this.showStatusList(ctx, OrderStatus.STORAGE, 1);
+            return;
+        }
+        if (option === 'lots') {
+            await this.showStorageLots(ctx, 1);
+            return;
+        }
+        if (option === 'new') await this.startNewStorageLot(ctx);
     }
 
     @Action(/^slpage:/)

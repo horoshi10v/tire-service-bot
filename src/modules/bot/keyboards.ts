@@ -32,9 +32,33 @@ export function mainMenuKeyboard(): ReplyKeyboardMarkup {
             ['🆕 Новий', '🔍 Пошук'],
             ['🟡 Прийняті', '🔵 В роботі'],
             ['🟢 Готові', '⚫ Видані'],
-            ['📦 На зберіганні', '📊 Статистика'],
-            ['🗄 Лоти зберігання', '➕ Нове зберігання'],
+            ['📦 Зберігання', '📊 Статистика'],
             ['📌 Відкрити замовлення', '⚙️ Тариф зберігання'],
+        ],
+    };
+}
+
+export function storageMenuKeyboard(): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [
+            [
+                {
+                    text: '📦 Замовлення на зберіганні',
+                    callback_data: 'storagemenu:orders',
+                },
+            ],
+            [
+                {
+                    text: '🗄 Окремі лоти',
+                    callback_data: 'storagemenu:lots',
+                },
+            ],
+            [
+                {
+                    text: '➕ Нове зберігання',
+                    callback_data: 'storagemenu:new',
+                },
+            ],
         ],
     };
 }
