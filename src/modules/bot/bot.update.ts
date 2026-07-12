@@ -99,6 +99,30 @@ export class BotUpdate {
         await sendOrderCard(ctx, order, { ...resolved, withStatus });
     }
 
+    private async replyPeriodStatistics(
+        ctx: BotContext,
+        from: Date,
+        title: string,
+        to?: Date
+    ) {
+        const stats = await this.orders.getPeriodStatistics(from, to);
+        const byEmployee = stats.issuedBy.length
+            ? `\n\n👥 По сотрудникам:\n${stats.issuedBy
+                  .map(
+                      (row) =>
+                          `• ${row.name}: ${row.count} выд. · ${row.total} грн`
+                  )
+                  .join('\n')}`
+            : '';
+        await ctx.reply(
+            `📊 Статистика ${title}\n\n` +
+                `⚫ Выдано: ${stats.count}\n` +
+                `💰 Сумма работ: ${stats.total} грн\n` +
+                `🧾 Средний чек: ${stats.average} грн` +
+                byEmployee
+        );
+    }
+
     // ---------- start ----------
     @Start()
     async start(@Ctx() ctx: BotContext) {
@@ -452,7 +476,8 @@ export class BotUpdate {
                       (employee) =>
                           `👤 ${employee.name}\n` +
                           `Прийняв: ${employee.accepted} · Взято в роботу: ${employee.inProgress}\n` +
-                          `Позначив готовим: ${employee.ready} · На зберігання: ${employee.storage} · Видав: ${employee.done}`
+                          `Позначив готовим: ${employee.ready} · На зберігання: ${employee.storage}\n` +
+                          `Видав: ${employee.done} · Заробив: ${employee.revenue} грн`
                   )
                   .join('\n\n')}`
             : '';
@@ -473,24 +498,22 @@ export class BotUpdate {
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async periodStatistics(@Ctx() ctx: BotContext) {
         const period = String((ctx.callbackQuery as any).data).split(':')[1];
+        if (period === 'custom') {
+            const s = ensureSession(ctx);
+            s.flow = 'customPeriod';
+            s.step = 'periodFrom';
+            await ctx.answerCbQuery();
+            await ctx.reply('Введите начальную дату в формате ДД.ММ.ГГГГ:');
+            return;
+        }
         const from = new Date();
         if (period === 'today') from.setHours(0, 0, 0, 0);
         else if (period === 'week') from.setDate(from.getDate() - 7);
         else from.setMonth(from.getMonth() - 1);
 
         const title = period === 'today' ? 'сьогодні' : period === 'week' ? 'за 7 днів' : 'за 30 днів';
-        const stats = await this.orders.getPeriodStatistics(from);
-        const byEmployee = stats.issuedBy.length
-            ? `\n\n👥 Видали замовлення:\n${stats.issuedBy.map((row) => `• ${row.name}: ${row.count}`).join('\n')}`
-            : '';
         await ctx.answerCbQuery();
-        await ctx.reply(
-            `📊 Статистика ${title}\n\n` +
-                `⚫ Видано: ${stats.count}\n` +
-                `💰 Сума робіт: ${stats.total} грн\n` +
-                `🧾 Середній чек: ${stats.average} грн` +
-                byEmployee
-        );
+        await this.replyPeriodStatistics(ctx, from, title);
     }
 
     @Hears('📦 Зберігання 7+ днів')
@@ -895,6 +918,51 @@ export class BotUpdate {
         if (!isEmployee) {
             // Regular users can only check status, nothing else
             return;
+        }
+
+        if (s.flow === 'customPeriod') {
+            const match = text.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+            if (!match) {
+                await ctx.reply('Введите дату в формате ДД.ММ.ГГГГ');
+                return;
+            }
+            const date = new Date(
+                Number(match[3]),
+                Number(match[2]) - 1,
+                Number(match[1])
+            );
+            if (
+                date.getFullYear() !== Number(match[3]) ||
+                date.getMonth() !== Number(match[2]) - 1 ||
+                date.getDate() !== Number(match[1])
+            ) {
+                await ctx.reply('Укажите существующую дату.');
+                return;
+            }
+            if (s.step === 'periodFrom') {
+                s.customPeriodFrom = date;
+                s.step = 'periodTo';
+                await ctx.reply('Введите конечную дату в формате ДД.ММ.ГГГГ:');
+                return;
+            }
+            if (s.step === 'periodTo' && s.customPeriodFrom) {
+                date.setHours(23, 59, 59, 999);
+                if (date < s.customPeriodFrom) {
+                    await ctx.reply('Конечная дата не может быть раньше начальной.');
+                    return;
+                }
+                const from = s.customPeriodFrom;
+                s.flow = null;
+                s.step = undefined;
+                s.customPeriodFrom = undefined;
+                await this.replyPeriodStatistics(
+                    ctx,
+                    from,
+                    `с ${from.toLocaleDateString('ru-RU')} по ${date.toLocaleDateString('ru-RU')}`,
+                    date
+                );
+                return;
+            }
         }
 
         if (s.flow === 'storageRate' && s.step === 'storageFee') {

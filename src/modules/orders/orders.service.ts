@@ -709,38 +709,51 @@ export class OrdersService {
         });
     }
 
-    async getPeriodStatistics(from: Date) {
-        const where = { status: OrderStatus.DONE, doneAt: { gte: from } };
-        const [count, totals, issued] = await Promise.all([
-            this.prisma.order.count({ where }),
-            this.prisma.order.aggregate({ where, _sum: { finalTotal: true } }),
-            this.prisma.orderStatusChange.groupBy({
-                by: ['changedById'],
-                where: { status: OrderStatus.DONE, createdAt: { gte: from } },
-                _count: { _all: true },
-            }),
-        ]);
-        const employees = issued.length
+    async getPeriodStatistics(from: Date, to?: Date) {
+        const orders = await this.prisma.order.findMany({
+            where: {
+                status: OrderStatus.DONE,
+                doneAt: { gte: from, ...(to ? { lte: to } : {}) },
+            },
+            select: {
+                finalTotal: true,
+                statusChanges: {
+                    where: { status: OrderStatus.DONE },
+                    select: { changedById: true },
+                },
+            },
+        });
+        const revenueByEmployee = new Map<string, { count: number; total: number }>();
+        for (const order of orders) {
+            const issuerId = order.statusChanges[0]?.changedById;
+            if (!issuerId) continue;
+            const current = revenueByEmployee.get(issuerId) ?? { count: 0, total: 0 };
+            current.count++;
+            current.total += order.finalTotal ?? 0;
+            revenueByEmployee.set(issuerId, current);
+        }
+        const employees = revenueByEmployee.size
             ? await this.prisma.employee.findMany({
-                  where: { id: { in: issued.map((row) => row.changedById) } },
+                  where: { id: { in: [...revenueByEmployee.keys()] } },
                   select: { id: true, name: true },
               })
             : [];
         const names = new Map(employees.map((e) => [e.id, e.name || 'Без імені']));
-        const total = totals._sum.finalTotal ?? 0;
+        const total = orders.reduce((sum, order) => sum + (order.finalTotal ?? 0), 0);
         return {
-            count,
+            count: orders.length,
             total,
-            average: count ? Math.round(total / count) : 0,
-            issuedBy: issued.map((row) => ({
-                name: names.get(row.changedById) ?? 'Без імені',
-                count: row._count._all,
+            average: orders.length ? Math.round(total / orders.length) : 0,
+            issuedBy: [...revenueByEmployee.entries()].map(([id, value]) => ({
+                name: names.get(id) ?? 'Без імені',
+                count: value.count,
+                total: value.total,
             })),
         };
     }
 
     async getEmployeeStatistics() {
-        const [accepted, statusChanges] = await Promise.all([
+        const [accepted, statusChanges, completedOrders] = await Promise.all([
             this.prisma.order.groupBy({
                 by: ['acceptedById'],
                 _count: { _all: true },
@@ -748,6 +761,16 @@ export class OrdersService {
             this.prisma.orderStatusChange.groupBy({
                 by: ['changedById', 'status'],
                 _count: { _all: true },
+            }),
+            this.prisma.order.findMany({
+                where: { status: OrderStatus.DONE },
+                select: {
+                    finalTotal: true,
+                    statusChanges: {
+                        where: { status: OrderStatus.DONE },
+                        select: { changedById: true },
+                    },
+                },
             }),
         ]);
 
@@ -772,6 +795,16 @@ export class OrdersService {
             accepted.map((row) => [row.acceptedById, row._count._all])
         );
         const changesByEmployee = new Map<string, Record<OrderStatus, number>>();
+        const revenueByEmployee = new Map<string, number>();
+        for (const order of completedOrders) {
+            const issuerId = order.statusChanges[0]?.changedById;
+            if (issuerId) {
+                revenueByEmployee.set(
+                    issuerId,
+                    (revenueByEmployee.get(issuerId) ?? 0) + (order.finalTotal ?? 0)
+                );
+            }
+        }
         for (const row of statusChanges) {
             const stats = changesByEmployee.get(row.changedById) ?? {
                 ACCEPTED: 0,
@@ -799,6 +832,7 @@ export class OrdersService {
                 ready: changes.READY,
                 storage: changes.STORAGE,
                 done: changes.DONE,
+                revenue: revenueByEmployee.get(employee.id) ?? 0,
             };
         });
     }

@@ -78,7 +78,7 @@ export function periodStatisticsKeyboard(): InlineKeyboardMarkup {
             { text: 'Сьогодні', callback_data: 'period:today' },
             { text: 'Тиждень', callback_data: 'period:week' },
             { text: 'Місяць', callback_data: 'period:month' },
-        ]],
+        ], [{ text: '📅 Свій період', callback_data: 'period:custom' }]],
     };
 }
 

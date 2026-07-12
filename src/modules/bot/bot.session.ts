@@ -9,6 +9,7 @@ export type BotFlow =
     | 'editItems'
     | 'storageRate'
     | 'storageOrderRate'
+    | 'customPeriod'
     | null;
 
 export type CreateStep =
@@ -38,6 +39,7 @@ export type EditStep =
 
 export type StorageRateStep = 'storageFee';
 export type StorageOrderRateStep = 'storageOrderFee';
+export type CustomPeriodStep = 'periodFrom' | 'periodTo';
 
 export interface OrderDraftItem {
     service: ServiceType;
@@ -56,7 +58,8 @@ export interface BotSessionData {
         | CheckStatusStep
         | EditStep
         | StorageRateStep
-        | StorageOrderRateStep;
+        | StorageOrderRateStep
+        | CustomPeriodStep;
 
     // create order flow
     photoFileId?: string;
@@ -81,6 +84,7 @@ export interface BotSessionData {
     finalTotal?: number;
     clientEmail?: string; // client email
     storageOrderPublicId?: number;
+    customPeriodFrom?: Date;
 
     // edit flow
     editPublicId?: number;
