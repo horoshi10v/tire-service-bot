@@ -516,19 +516,10 @@ export class BotUpdate {
         await this.replyPeriodStatistics(ctx, from, title);
     }
 
-    @Hears('📦 Зберігання 7+ днів')
+    @Hears('📦 На зберіганні')
     @Roles(UserRole.MASTER, UserRole.ADMIN)
-    async storageOverdue(@Ctx() ctx: BotContext) {
-        const orders = await this.orders.listStorageOverdue(7);
-        if (!orders.length) {
-            await ctx.reply('📦 Немає замовлень на зберіганні понад 7 днів.');
-            return;
-        }
-        await ctx.reply(`📦 На зберіганні понад 7 днів: ${orders.length}`);
-        const options = await this.getCardOptions(ctx);
-        for (const order of orders) {
-            await this.sendOrderCardForUser(ctx, order, true, options);
-        }
+    async listStorage(@Ctx() ctx: BotContext) {
+        await this.showStatusList(ctx, OrderStatus.STORAGE, 1);
     }
 
     // ---------- photo: start create flow ----------

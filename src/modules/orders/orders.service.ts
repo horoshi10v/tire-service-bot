@@ -691,24 +691,6 @@ export class OrdersService {
         return map;
     }
 
-    async listStorageOverdue(days = 7) {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - days);
-        return this.prisma.order.findMany({
-            where: {
-                status: OrderStatus.STORAGE,
-                storageStartedAt: { lte: cutoff },
-            },
-            orderBy: { storageStartedAt: 'asc' },
-            take: 50,
-            include: {
-                items: true,
-                photos: true,
-                acceptedBy: { select: { name: true, tgId: true } },
-            },
-        });
-    }
-
     async getPeriodStatistics(from: Date, to?: Date) {
         const orders = await this.prisma.order.findMany({
             where: {
