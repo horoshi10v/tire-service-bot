@@ -717,6 +717,7 @@ export class OrdersService {
             },
             select: {
                 finalTotal: true,
+                assignedToId: true,
                 statusChanges: {
                     where: { status: OrderStatus.DONE },
                     select: { changedById: true },
@@ -725,7 +726,8 @@ export class OrdersService {
         });
         const revenueByEmployee = new Map<string, { count: number; total: number }>();
         for (const order of orders) {
-            const issuerId = order.statusChanges[0]?.changedById;
+            const issuerId =
+                order.statusChanges[0]?.changedById ?? order.assignedToId;
             if (!issuerId) continue;
             const current = revenueByEmployee.get(issuerId) ?? { count: 0, total: 0 };
             current.count++;
@@ -766,6 +768,7 @@ export class OrdersService {
                 where: { status: OrderStatus.DONE },
                 select: {
                     finalTotal: true,
+                    assignedToId: true,
                     statusChanges: {
                         where: { status: OrderStatus.DONE },
                         select: { changedById: true },
@@ -777,6 +780,11 @@ export class OrdersService {
         const employeeIds = new Set<string>([
             ...accepted.map((row) => row.acceptedById),
             ...statusChanges.map((row) => row.changedById),
+            ...completedOrders.flatMap((order) => {
+                const issuerId =
+                    order.statusChanges[0]?.changedById ?? order.assignedToId;
+                return issuerId ? [issuerId] : [];
+            }),
         ]);
         const employees = await this.prisma.employee.findMany({
             where: employeeIds.size
@@ -797,7 +805,8 @@ export class OrdersService {
         const changesByEmployee = new Map<string, Record<OrderStatus, number>>();
         const revenueByEmployee = new Map<string, number>();
         for (const order of completedOrders) {
-            const issuerId = order.statusChanges[0]?.changedById;
+            const issuerId =
+                order.statusChanges[0]?.changedById ?? order.assignedToId;
             if (issuerId) {
                 revenueByEmployee.set(
                     issuerId,
