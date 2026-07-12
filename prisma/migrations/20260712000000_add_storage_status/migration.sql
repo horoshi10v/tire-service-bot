@@ -1,0 +1,3 @@
+ALTER TYPE "OrderStatus" ADD VALUE 'STORAGE';
+
+ALTER TABLE "Order" ADD COLUMN "storageStartedAt" TIMESTAMP(3);
