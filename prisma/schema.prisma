@@ -47,6 +47,7 @@ model Employee {
 
   transfersFrom  OrderTransfer[] @relation("TransferFrom")
   transfersTo    OrderTransfer[] @relation("TransferTo")
+  statusChanges  OrderStatusChange[]
 
   @@index([role, isActive])
   orderTransfers OrderTransfer[]
@@ -81,6 +82,7 @@ model Order {
 
   items     OrderItem[]
   transfers OrderTransfer[]
+  statusChanges OrderStatusChange[]
 
   @@index([clientPhone])
   @@index([status, createdAt])
@@ -137,4 +139,18 @@ model OrderTransfer {
   @@index([orderId])
   @@index([fromId])
   @@index([toId])
+}
+
+model OrderStatusChange {
+  id          String      @id @default(cuid())
+  orderId     String
+  status      OrderStatus
+  changedById String
+  createdAt   DateTime    @default(now())
+
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedBy Employee @relation(fields: [changedById], references: [id])
+
+  @@index([orderId, createdAt])
+  @@index([changedById, status])
 }

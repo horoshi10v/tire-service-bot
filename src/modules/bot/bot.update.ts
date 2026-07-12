@@ -375,7 +375,21 @@ export class BotUpdate {
     @Hears('📊 Статистика')
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async summary(@Ctx() ctx: BotContext) {
-        const stats = await this.orders.countByStatus();
+        const [stats, employees] = await Promise.all([
+            this.orders.countByStatus(),
+            this.orders.getEmployeeStatistics(),
+        ]);
+
+        const employeesText = employees.length
+            ? `\n\n👥 По працівниках (за весь час):\n\n${employees
+                  .map(
+                      (employee) =>
+                          `👤 ${employee.name}\n` +
+                          `Прийняв: ${employee.accepted} · Взято в роботу: ${employee.inProgress}\n` +
+                          `Позначив готовим: ${employee.ready} · На зберігання: ${employee.storage} · Видав: ${employee.done}`
+                  )
+                  .join('\n\n')}`
+            : '';
 
         await ctx.reply(
             `📊 Статистика замовлень:\n\n` +
@@ -383,7 +397,8 @@ export class BotUpdate {
                 `🔵 В роботі: ${stats.IN_PROGRESS}\n` +
                 `🟢 Готові: ${stats.READY}\n` +
                 `📦 На зберіганні: ${stats.STORAGE}\n` +
-                `⚫ Видані: ${stats.DONE}`
+                `⚫ Видані: ${stats.DONE}` +
+                employeesText
         );
     }
 

@@ -154,6 +154,7 @@ export class OrdersRepository implements IOrdersRepository {
         toMasterId: string;
         newStatus: OrderStatus;
         storageStartedAt: Date | null;
+        statusChangedById: string;
         transferredByTgId: bigint;
     }): Promise<void> {
         // Get employee ID from tgId
@@ -181,6 +182,13 @@ export class OrdersRepository implements IOrdersRepository {
                     fromId: params.fromMasterId,
                     toId: params.toMasterId,
                     byId: transferredBy.id,
+                },
+            }),
+            this.prisma.orderStatusChange.create({
+                data: {
+                    orderId: params.orderId,
+                    status: params.newStatus,
+                    changedById: params.statusChangedById,
                 },
             }),
         ]);

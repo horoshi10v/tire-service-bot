@@ -447,18 +447,30 @@ export class OrdersService {
                 newStatus: input.status,
                 storageStartedAt:
                     input.status === OrderStatus.STORAGE ? new Date() : null,
+                statusChangedById: by.id,
                 transferredByTgId: by.tgId,
             });
         } else {
             // Same master, just update status
-            await this.prisma.order.update({
-                where: { id: order.id },
-                data: {
-                    status: input.status,
-                    storageStartedAt:
-                        input.status === OrderStatus.STORAGE ? new Date() : null,
-                },
-            });
+            await this.prisma.$transaction([
+                this.prisma.order.update({
+                    where: { id: order.id },
+                    data: {
+                        status: input.status,
+                        storageStartedAt:
+                            input.status === OrderStatus.STORAGE
+                                ? new Date()
+                                : null,
+                    },
+                }),
+                this.prisma.orderStatusChange.create({
+                    data: {
+                        orderId: order.id,
+                        status: input.status,
+                        changedById: by.id,
+                    },
+                }),
+            ]);
         }
 
         const updatedOrder = await this.prisma.order.findUnique({
@@ -489,7 +501,23 @@ export class OrdersService {
     async finalizeOrder(
         input: FinalizeOrderInput
     ): Promise<FinalizeOrderResult> {
-        const order = await this.prisma.order.update({
+        const by = await this.requireRole(input.byTgId, [
+            EmployeeRole.MASTER,
+            EmployeeRole.ADMIN,
+        ]);
+
+        const existing = await this.prisma.order.findUnique({
+            where: { publicId: input.orderPublicId },
+            select: { id: true, status: true },
+        });
+        if (!existing) throw new OrderNotFoundException(input.orderPublicId);
+        if (OrderStateMachine.isFinalState(existing.status)) {
+            throw new OrderAlreadyDoneException(input.orderPublicId);
+        }
+        OrderStateMachine.validateTransition(existing.status, OrderStatus.DONE);
+
+        const order = await this.prisma.$transaction(async (tx) => {
+            const updated = await tx.order.update({
             where: { publicId: input.orderPublicId },
             data: {
                 status: OrderStatus.DONE,
@@ -504,6 +532,15 @@ export class OrdersService {
                 createdBy: true,
                 assignedTo: true,
             },
+            });
+            await tx.orderStatusChange.create({
+                data: {
+                    orderId: updated.id,
+                    status: OrderStatus.DONE,
+                    changedById: by.id,
+                },
+            });
+            return updated;
         });
 
         // 1. Generate PDF
@@ -617,5 +654,69 @@ export class OrdersService {
         }
 
         return map;
+    }
+
+    async getEmployeeStatistics() {
+        const [accepted, statusChanges] = await Promise.all([
+            this.prisma.order.groupBy({
+                by: ['acceptedById'],
+                _count: { _all: true },
+            }),
+            this.prisma.orderStatusChange.groupBy({
+                by: ['changedById', 'status'],
+                _count: { _all: true },
+            }),
+        ]);
+
+        const employeeIds = new Set<string>([
+            ...accepted.map((row) => row.acceptedById),
+            ...statusChanges.map((row) => row.changedById),
+        ]);
+        const employees = await this.prisma.employee.findMany({
+            where: employeeIds.size
+                ? {
+                      OR: [
+                          { isActive: true },
+                          { id: { in: [...employeeIds] } },
+                      ],
+                  }
+                : { isActive: true },
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+        });
+
+        const acceptedById = new Map(
+            accepted.map((row) => [row.acceptedById, row._count._all])
+        );
+        const changesByEmployee = new Map<string, Record<OrderStatus, number>>();
+        for (const row of statusChanges) {
+            const stats = changesByEmployee.get(row.changedById) ?? {
+                ACCEPTED: 0,
+                IN_PROGRESS: 0,
+                READY: 0,
+                STORAGE: 0,
+                DONE: 0,
+            };
+            stats[row.status] = row._count._all;
+            changesByEmployee.set(row.changedById, stats);
+        }
+
+        return employees.map((employee) => {
+            const changes = changesByEmployee.get(employee.id) ?? {
+                ACCEPTED: 0,
+                IN_PROGRESS: 0,
+                READY: 0,
+                STORAGE: 0,
+                DONE: 0,
+            };
+            return {
+                name: employee.name || 'Без імені',
+                accepted: acceptedById.get(employee.id) ?? 0,
+                inProgress: changes.IN_PROGRESS,
+                ready: changes.READY,
+                storage: changes.STORAGE,
+                done: changes.DONE,
+            };
+        });
     }
 }
