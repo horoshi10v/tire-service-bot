@@ -17,6 +17,8 @@ import {
     SERVICE_LABELS,
     mainMenuKeyboard,
     deleteConfirmKeyboard,
+    storageRateKeyboard,
+    periodStatisticsKeyboard,
 } from './keyboards';
 import { EmployeeRole, OrderStatus, ServiceType } from '@prisma/client';
 import {
@@ -372,6 +374,34 @@ export class BotUpdate {
         await ctx.reply('Введіть номер замовлення, наприклад: 1234');
     }
 
+    @Hears('⚙️ Тариф зберігання')
+    @Roles(UserRole.ADMIN)
+    async storageRate(@Ctx() ctx: BotContext) {
+        const fee = await this.orders.getStorageFeePerDay();
+        await ctx.reply(`⚙️ Поточний тариф: ${fee} грн/день`, {
+            reply_markup: storageRateKeyboard(),
+        });
+    }
+
+    @Action(/^storagefee:/)
+    @Roles(UserRole.ADMIN)
+    async setStorageRate(@Ctx() ctx: BotContext) {
+        const value = String((ctx.callbackQuery as any).data).split(':')[1];
+        if (value === 'custom') {
+            const s = ensureSession(ctx);
+            s.flow = 'storageRate';
+            s.step = 'storageFee';
+            await ctx.answerCbQuery();
+            await ctx.reply('Введіть тариф у грн за 1 день зберігання:');
+            return;
+        }
+
+        const fee = Number(value);
+        await this.orders.setStorageFeePerDay(fee);
+        await ctx.answerCbQuery('Збережено');
+        await ctx.reply(`✅ Тариф зберігання: ${fee} грн/день`);
+    }
+
     @Hears('📊 Статистика')
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async summary(@Ctx() ctx: BotContext) {
@@ -398,8 +428,48 @@ export class BotUpdate {
                 `🟢 Готові: ${stats.READY}\n` +
                 `📦 На зберіганні: ${stats.STORAGE}\n` +
                 `⚫ Видані: ${stats.DONE}` +
-                employeesText
+                employeesText,
+            { reply_markup: periodStatisticsKeyboard() }
         );
+    }
+
+    @Action(/^period:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async periodStatistics(@Ctx() ctx: BotContext) {
+        const period = String((ctx.callbackQuery as any).data).split(':')[1];
+        const from = new Date();
+        if (period === 'today') from.setHours(0, 0, 0, 0);
+        else if (period === 'week') from.setDate(from.getDate() - 7);
+        else from.setMonth(from.getMonth() - 1);
+
+        const title = period === 'today' ? 'сьогодні' : period === 'week' ? 'за 7 днів' : 'за 30 днів';
+        const stats = await this.orders.getPeriodStatistics(from);
+        const byEmployee = stats.issuedBy.length
+            ? `\n\n👥 Видали замовлення:\n${stats.issuedBy.map((row) => `• ${row.name}: ${row.count}`).join('\n')}`
+            : '';
+        await ctx.answerCbQuery();
+        await ctx.reply(
+            `📊 Статистика ${title}\n\n` +
+                `⚫ Видано: ${stats.count}\n` +
+                `💰 Сума робіт: ${stats.total} грн\n` +
+                `🧾 Середній чек: ${stats.average} грн` +
+                byEmployee
+        );
+    }
+
+    @Hears('📦 Зберігання 7+ днів')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async storageOverdue(@Ctx() ctx: BotContext) {
+        const orders = await this.orders.listStorageOverdue(7);
+        if (!orders.length) {
+            await ctx.reply('📦 Немає замовлень на зберіганні понад 7 днів.');
+            return;
+        }
+        await ctx.reply(`📦 На зберіганні понад 7 днів: ${orders.length}`);
+        const options = await this.getCardOptions(ctx);
+        for (const order of orders) {
+            await this.sendOrderCardForUser(ctx, order, true, options);
+        }
     }
 
     // ---------- photo: start create flow ----------
@@ -776,6 +846,20 @@ export class BotUpdate {
 
         if (!isEmployee) {
             // Regular users can only check status, nothing else
+            return;
+        }
+
+        if (s.flow === 'storageRate' && s.step === 'storageFee') {
+            const role = await this.auth.getUserRole(tgId);
+            const fee = parseIntStrict(text);
+            if (role !== EmployeeRole.ADMIN || fee === null || fee < 0) {
+                await ctx.reply('Введіть цілий тариф від 0 грн/день');
+                return;
+            }
+            await this.orders.setStorageFeePerDay(fee);
+            s.flow = null;
+            s.step = undefined;
+            await ctx.reply(`✅ Тариф зберігання: ${fee} грн/день`);
             return;
         }
 

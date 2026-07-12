@@ -80,6 +80,27 @@ export class OrdersService {
         }
     }
 
+    async getStorageFeePerDay(): Promise<number> {
+        const settings = await this.prisma.storageSettings.upsert({
+            where: { id: 'default' },
+            create: { id: 'default', feePerDay: 0 },
+            update: {},
+        });
+        return settings.feePerDay;
+    }
+
+    async setStorageFeePerDay(feePerDay: number): Promise<number> {
+        if (!Number.isInteger(feePerDay) || feePerDay < 0) {
+            throw new ValidationException('Тариф має бути цілим числом від 0');
+        }
+        const settings = await this.prisma.storageSettings.upsert({
+            where: { id: 'default' },
+            create: { id: 'default', feePerDay },
+            update: { feePerDay },
+        });
+        return settings.feePerDay;
+    }
+
     /**
      * Permissions:
      * - MASTER can create/update their own work orders
@@ -439,6 +460,11 @@ export class OrdersService {
             );
         }
 
+        const storageFeePerDay =
+            input.status === OrderStatus.STORAGE
+                ? await this.getStorageFeePerDay()
+                : null;
+
         if (order.assignedToId !== by.id) {
             await this.repository.transferAndUpdateStatus({
                 orderId: order.id,
@@ -447,6 +473,7 @@ export class OrdersService {
                 newStatus: input.status,
                 storageStartedAt:
                     input.status === OrderStatus.STORAGE ? new Date() : null,
+                storageFeePerDay,
                 statusChangedById: by.id,
                 transferredByTgId: by.tgId,
             });
@@ -461,6 +488,7 @@ export class OrdersService {
                             input.status === OrderStatus.STORAGE
                                 ? new Date()
                                 : null,
+                        storageFeePerDay,
                     },
                 }),
                 this.prisma.orderStatusChange.create({
@@ -654,6 +682,54 @@ export class OrdersService {
         }
 
         return map;
+    }
+
+    async listStorageOverdue(days = 7) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        return this.prisma.order.findMany({
+            where: {
+                status: OrderStatus.STORAGE,
+                storageStartedAt: { lte: cutoff },
+            },
+            orderBy: { storageStartedAt: 'asc' },
+            take: 50,
+            include: {
+                items: true,
+                photos: true,
+                acceptedBy: { select: { name: true, tgId: true } },
+            },
+        });
+    }
+
+    async getPeriodStatistics(from: Date) {
+        const where = { status: OrderStatus.DONE, doneAt: { gte: from } };
+        const [count, totals, issued] = await Promise.all([
+            this.prisma.order.count({ where }),
+            this.prisma.order.aggregate({ where, _sum: { finalTotal: true } }),
+            this.prisma.orderStatusChange.groupBy({
+                by: ['changedById'],
+                where: { status: OrderStatus.DONE, createdAt: { gte: from } },
+                _count: { _all: true },
+            }),
+        ]);
+        const employees = issued.length
+            ? await this.prisma.employee.findMany({
+                  where: { id: { in: issued.map((row) => row.changedById) } },
+                  select: { id: true, name: true },
+              })
+            : [];
+        const names = new Map(employees.map((e) => [e.id, e.name || 'Без імені']));
+        const total = totals._sum.finalTotal ?? 0;
+        return {
+            count,
+            total,
+            average: count ? Math.round(total / count) : 0,
+            issuedBy: issued.map((row) => ({
+                name: names.get(row.changedById) ?? 'Без імені',
+                count: row._count._all,
+            })),
+        };
     }
 
     async getEmployeeStatistics() {

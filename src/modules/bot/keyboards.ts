@@ -31,8 +31,32 @@ export function mainMenuKeyboard(): ReplyKeyboardMarkup {
             ['🆕 Новий', '🔍 Пошук'],
             ['🟡 Прийняті', '🔵 В роботі'],
             ['🟢 Готові', '⚫ Видані'],
-            ['📌 Відкрити замовлення', '📊 Статистика'],
+            ['📦 Зберігання 7+ днів', '📊 Статистика'],
+            ['📌 Відкрити замовлення', '⚙️ Тариф зберігання'],
         ],
+    };
+}
+
+export function storageRateKeyboard(): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [
+            [
+                { text: '0 грн/день', callback_data: 'storagefee:0' },
+                { text: '20 грн/день', callback_data: 'storagefee:20' },
+                { text: '50 грн/день', callback_data: 'storagefee:50' },
+            ],
+            [{ text: '✏️ Інша сума', callback_data: 'storagefee:custom' }],
+        ],
+    };
+}
+
+export function periodStatisticsKeyboard(): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [[
+            { text: 'Сьогодні', callback_data: 'period:today' },
+            { text: 'Тиждень', callback_data: 'period:week' },
+            { text: 'Місяць', callback_data: 'period:month' },
+        ]],
     };
 }
 

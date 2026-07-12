@@ -7,6 +7,7 @@ export type BotFlow =
     | 'checkStatus'
     | 'edit'
     | 'editItems'
+    | 'storageRate'
     | null;
 
 export type CreateStep =
@@ -34,6 +35,8 @@ export type EditStep =
     | 'editEmail'
     | 'editPhoto';
 
+export type StorageRateStep = 'storageFee';
+
 export interface OrderDraftItem {
     service: ServiceType;
     price: number;
@@ -49,7 +52,8 @@ export interface BotSessionData {
         | FinalizeStep
         | OpenStep
         | CheckStatusStep
-        | EditStep;
+        | EditStep
+        | StorageRateStep;
 
     // create order flow
     photoFileId?: string;

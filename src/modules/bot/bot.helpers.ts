@@ -87,6 +87,10 @@ export function formatOrderShort(order: any) {
                   )
               )
             : null;
+    const storageTotal =
+        storageDays !== null && order.storageFeePerDay
+            ? storageDays * order.storageFeePerDay
+            : null;
 
     return (
         `#${order.publicId} ${STATUS_LABELS[order.status]}\n` +
@@ -97,7 +101,10 @@ export function formatOrderShort(order: any) {
         `💵 Разом: ${order.finalTotal ?? '—'}` +
         (storageDays === null
             ? ''
-            : `\n📦 На зберіганні: ${storageDays} дн.`)
+            : `\n📦 На зберіганні: ${storageDays} дн.` +
+              (storageTotal === null
+                  ? ''
+                  : ` · ${storageTotal} грн (${order.storageFeePerDay} грн/день)`))
     );
 }
 
