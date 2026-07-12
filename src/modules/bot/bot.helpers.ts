@@ -77,13 +77,27 @@ export function formatOrderShort(order: any) {
         })
         .join('\n');
 
+    const storageDays =
+        order.status === OrderStatus.STORAGE && order.storageStartedAt
+            ? Math.max(
+                  0,
+                  Math.floor(
+                      (Date.now() - new Date(order.storageStartedAt).getTime()) /
+                          (1000 * 60 * 60 * 24)
+                  )
+              )
+            : null;
+
     return (
         `#${order.publicId} ${STATUS_LABELS[order.status]}\n` +
         `📞 ${order.clientPhone}\n` +
         `👤 Прийняв: ${formatMaster(order)}\n` +
         `🧾 Послуги:\n${itemsText || '—'}\n` +
         `💰 Орієнтир: ${order.estimateTotal ?? '—'}\n` +
-        `💵 Разом: ${order.finalTotal ?? '—'}`
+        `💵 Разом: ${order.finalTotal ?? '—'}` +
+        (storageDays === null
+            ? ''
+            : `\n📦 На зберіганні: ${storageDays} дн.`)
     );
 }
 

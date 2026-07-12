@@ -36,6 +36,7 @@ export class TelegramNotificationStrategy implements INotificationStrategy {
             ACCEPTED: 'Прийнято',
             IN_PROGRESS: 'В роботі',
             READY: 'Готово',
+            STORAGE: 'Розташовано на зберіганні',
             DONE: 'Видано',
         };
 

@@ -105,7 +105,7 @@ The application will start, and the bot will be ready to accept commands.
 | `🆕 Новий` | Create a new order (starts by uploading a photo) |
 | `🔍 Пошук` | Interactive search by phone number |
 | `📌 Відкрити замовлення` | Open an order by ID |
-| `📊 Зведення` | Show current order statistics |
+| `📊 Статистика` | Show current order statistics |
 | `🟡 Прийняті` | List orders with status **Accepted** |
 | `🔵 В роботі` | List orders with status **In Progress** |
 | `🟢 Готові` | List orders with status **Ready** |
@@ -169,4 +169,3 @@ This project is licensed under the **MIT License**.
 <div align="center">
   <sub>Built with ❤️ for Dnipro Tire Services</sub>
 </div>
-

@@ -84,6 +84,7 @@ export interface IOrdersRepository {
         fromMasterId: string | null;
         toMasterId: string;
         newStatus: OrderStatus;
+        storageStartedAt: Date | null;
         transferredByTgId: bigint;
     }): Promise<void>;
 }

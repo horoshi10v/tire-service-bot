@@ -15,6 +15,7 @@ enum OrderStatus {
   ACCEPTED
   IN_PROGRESS
   READY
+  STORAGE
   DONE
 }
 
@@ -71,6 +72,7 @@ model Order {
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  storageStartedAt DateTime?
   doneAt        DateTime?
 
   acceptedBy Employee @relation("AcceptedBy", fields: [acceptedById], references: [id])

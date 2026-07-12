@@ -445,13 +445,19 @@ export class OrdersService {
                 fromMasterId: order.assignedToId,
                 toMasterId: by.id,
                 newStatus: input.status,
+                storageStartedAt:
+                    input.status === OrderStatus.STORAGE ? new Date() : null,
                 transferredByTgId: by.tgId,
             });
         } else {
             // Same master, just update status
             await this.prisma.order.update({
                 where: { id: order.id },
-                data: { status: input.status },
+                data: {
+                    status: input.status,
+                    storageStartedAt:
+                        input.status === OrderStatus.STORAGE ? new Date() : null,
+                },
             });
         }
 
@@ -602,6 +608,7 @@ export class OrdersService {
             ACCEPTED: 0,
             IN_PROGRESS: 0,
             READY: 0,
+            STORAGE: 0,
             DONE: 0,
         };
 

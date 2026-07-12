@@ -372,16 +372,17 @@ export class BotUpdate {
         await ctx.reply('Введіть номер замовлення, наприклад: 1234');
     }
 
-    @Hears('📊 Сводка')
+    @Hears('📊 Статистика')
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async summary(@Ctx() ctx: BotContext) {
         const stats = await this.orders.countByStatus();
 
         await ctx.reply(
-            `📊 Зведення замовлень:\n\n` +
+            `📊 Статистика замовлень:\n\n` +
                 `🟡 Прийняті: ${stats.ACCEPTED}\n` +
                 `🔵 В роботі: ${stats.IN_PROGRESS}\n` +
                 `🟢 Готові: ${stats.READY}\n` +
+                `📦 На зберіганні: ${stats.STORAGE}\n` +
                 `⚫ Видані: ${stats.DONE}`
         );
     }
@@ -712,6 +713,7 @@ export class BotUpdate {
                     ACCEPTED: '🟡',
                     IN_PROGRESS: '🔵',
                     READY: '🟢',
+                    STORAGE: '📦',
                     DONE: '⚫',
                 };
 
@@ -719,6 +721,7 @@ export class BotUpdate {
                     ACCEPTED: 'Прийнято',
                     IN_PROGRESS: 'В роботі',
                     READY: 'Готово',
+                    STORAGE: 'Розташовано на зберіганні',
                     DONE: 'Видано',
                 };
 

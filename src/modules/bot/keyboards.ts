@@ -17,6 +17,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
     ACCEPTED: '🟡 Прийнято',
     IN_PROGRESS: '🔵 В роботі',
     READY: '🟢 Готово',
+    STORAGE: '📦 Розташовано на зберіганні',
     DONE: '⚫ Видано',
 };
 
@@ -30,7 +31,7 @@ export function mainMenuKeyboard(): ReplyKeyboardMarkup {
             ['🆕 Новий', '🔍 Пошук'],
             ['🟡 Прийняті', '🔵 В роботі'],
             ['🟢 Готові', '⚫ Видані'],
-            ['📌 Відкрити замовлення', '📊 Зведення'],
+            ['📌 Відкрити замовлення', '📊 Статистика'],
         ],
     };
 }
@@ -71,6 +72,12 @@ export function statusKeyboard(publicId: number): InlineKeyboardMarkup {
                     text: STATUS_LABELS.READY,
                     callback_data: `st:${publicId}:READY`,
                 },
+            ],
+            [
+                {
+                    text: STATUS_LABELS.STORAGE,
+                    callback_data: `st:${publicId}:STORAGE`,
+                },
                 {
                     text: STATUS_LABELS.DONE,
                     callback_data: `st:${publicId}:DONE`,
@@ -103,6 +110,12 @@ export function orderInlineKeyboard(params: {
             {
                 text: STATUS_LABELS.READY,
                 callback_data: `st:${params.publicId}:READY`,
+            },
+        ]);
+        rows.push([
+            {
+                text: STATUS_LABELS.STORAGE,
+                callback_data: `st:${params.publicId}:STORAGE`,
             },
             {
                 text: STATUS_LABELS.DONE,

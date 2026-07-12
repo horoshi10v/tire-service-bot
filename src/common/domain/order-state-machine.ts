@@ -12,7 +12,8 @@ export class OrderStateMachine {
                 [OrderStatus.IN_PROGRESS, OrderStatus.READY],
             ],
             [OrderStatus.IN_PROGRESS, [OrderStatus.READY, OrderStatus.DONE]],
-            [OrderStatus.READY, [OrderStatus.DONE]],
+            [OrderStatus.READY, [OrderStatus.STORAGE, OrderStatus.DONE]],
+            [OrderStatus.STORAGE, [OrderStatus.DONE]],
             [OrderStatus.DONE, []], // Final state
         ]);
 

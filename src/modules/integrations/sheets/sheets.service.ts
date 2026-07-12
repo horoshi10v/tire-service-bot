@@ -31,6 +31,7 @@ const BACKUP_HEADERS = [
     'photoFileIdsJson',
     'createdAt',
     'updatedAt',
+    'storageStartedAt',
     'doneAt',
     'itemsJson',
 ];
@@ -224,6 +225,9 @@ export class SheetsService {
                 : '',
             updatedAt: order.updatedAt
                 ? new Date(order.updatedAt).toISOString()
+                : '',
+            storageStartedAt: order.storageStartedAt
+                ? new Date(order.storageStartedAt).toISOString()
                 : '',
             doneAt: order.doneAt ? new Date(order.doneAt).toISOString() : '',
             itemsJson,
@@ -562,6 +566,7 @@ export class SheetsService {
             const createdAt =
                 parseDate(row.get('createdAt')) ?? new Date();
             const doneAt = parseDate(row.get('doneAt'));
+            const storageStartedAt = parseDate(row.get('storageStartedAt'));
 
             await this.prisma.order.upsert({
                 where: { publicId: Math.trunc(publicId) },
@@ -577,6 +582,7 @@ export class SheetsService {
                         ? photoIds[0]
                         : String(row.get('photoFileId') ?? '').trim() || null,
                     createdAt,
+                    storageStartedAt,
                     doneAt,
                     acceptedBy: { connect: { id: acceptedById } },
                     createdBy: { connect: { id: createdById } },
@@ -621,6 +627,7 @@ export class SheetsService {
                         ? photoIds[0]
                         : String(row.get('photoFileId') ?? '').trim() || null,
                     doneAt,
+                    storageStartedAt,
                     acceptedBy: { connect: { id: acceptedById } },
                     createdBy: { connect: { id: createdById } },
                     ...(assignedToId
