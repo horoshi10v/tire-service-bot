@@ -11,7 +11,7 @@ import { UseGuards } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import { AuthService } from '../auth/auth.service';
 import { OrdersService } from '../orders/orders.service';
-import { BotSessionData } from './bot.session';
+import { BotSessionData, DEFAULT_SESSION } from './bot.session';
 import {
     servicesKeyboard,
     SERVICE_LABELS,
@@ -20,10 +20,13 @@ import {
     storageRateKeyboard,
     storageRateChoiceKeyboard,
     periodStatisticsKeyboard,
+    storageLotTypeKeyboard,
+    storageLotsKeyboard,
 } from './keyboards';
 import { EmployeeRole, OrderStatus, ServiceType } from '@prisma/client';
 import {
     ensureSession,
+    isPhoneLike,
     parseIntStrict,
     sendOrderCard,
     notifyAllAdmins,
@@ -41,6 +44,8 @@ import {
     handleEditTextFlow,
     startEditMenu,
 } from './edit-order.flow';
+import { StorageService } from '../storage';
+import { StorageLotType } from '@prisma/client';
 
 type BotContext = Context & { session: BotSessionData };
 
@@ -54,7 +59,8 @@ export class BotUpdate {
         private orders: OrdersService,
         private warranty: WarrantyVerificationService,
         private warrantyHandler: WarrantyVerificationHandler,
-        private sheets: SheetsService
+        private sheets: SheetsService,
+        private storage: StorageService
     ) {}
 
     private async showStatusList(
@@ -121,6 +127,14 @@ export class BotUpdate {
                 `🧾 Средний чек: ${stats.average} грн` +
                 byEmployee
         );
+    }
+
+    private async showStorageLots(ctx: BotContext, page: number) {
+        const result = await this.storage.listActive(page, PAGE_SIZE);
+        const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+        await ctx.reply(`🗄 Лоты хранения: ${result.total}`, {
+            reply_markup: storageLotsKeyboard(result.items, page, totalPages),
+        });
     }
 
     // ---------- start ----------
@@ -454,8 +468,17 @@ export class BotUpdate {
                 byTgId: BigInt(ctx.from!.id),
                 status: OrderStatus.STORAGE,
             });
+            if (!updated) throw new Error('Замовлення не знайдено');
             await ctx.answerCbQuery('Збережено');
-            await this.sendOrderCardForUser(ctx, updated, true);
+            const s = ensureSession(ctx);
+            s.flow = 'storageLot';
+            s.step = undefined;
+            s.phone = updated.clientPhone;
+            s.storageOrderPublicId = publicId;
+            s.storageLotWheels = [];
+            await ctx.reply('Заполните данные комплекта для хранения:', {
+                reply_markup: storageLotTypeKeyboard(),
+            });
         } catch (e) {
             await ctx.answerCbQuery();
             await ctx.reply('🚨 Не вдалося перевести замовлення на зберігання.');
@@ -520,6 +543,59 @@ export class BotUpdate {
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async listStorage(@Ctx() ctx: BotContext) {
         await this.showStatusList(ctx, OrderStatus.STORAGE, 1);
+    }
+
+    @Hears('➕ Нове зберігання')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async newStorageLot(@Ctx() ctx: BotContext) {
+        const s = ensureSession(ctx);
+        s.flow = 'storageLot';
+        s.step = 'storageLotPhone';
+        s.storageLotWheels = [];
+        await ctx.reply('Введіть номер телефону клієнта:');
+    }
+
+    @Hears('🗄 Лоты хранения')
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async listStorageLots(@Ctx() ctx: BotContext) {
+        await this.showStorageLots(ctx, 1);
+    }
+
+    @Action(/^slpage:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async storageLotPage(@Ctx() ctx: BotContext) {
+        const page = Number(String((ctx.callbackQuery as any).data).split(':')[1]) || 1;
+        await ctx.answerCbQuery();
+        await this.showStorageLots(ctx, page);
+    }
+
+    @Action(/^slopen:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async openStorageLot(@Ctx() ctx: BotContext) {
+        const publicId = Number(String((ctx.callbackQuery as any).data).split(':')[1]);
+        const lot = await this.storage.getByPublicId(publicId);
+        await ctx.answerCbQuery();
+        if (!lot) return ctx.reply('Лот хранения не найден.');
+        const days = Math.max(0, Math.floor((Date.now() - new Date(lot.storedAt).getTime()) / 86_400_000));
+        const wheels = Array.isArray(lot.wheelDetails)
+            ? lot.wheelDetails.map((wheel: any) => `• Колесо ${wheel.position}: протектор ${wheel.treadDepth ?? '—'}; дефекты: ${wheel.defects ?? '—'}`).join('\n')
+            : '—';
+        await ctx.reply(
+            `🗄 Лот #${lot.publicId}\n📞 ${lot.clientPhone}\n📦 ${lot.type}: ${lot.quantity} шт.\n📐 ${lot.size ?? '—'} · ${lot.brand ?? '—'}\n📅 Хранение: ${days} дн.\n💰 ${lot.feePerDay} грн/день · ${days * lot.feePerDay} грн\n🛞 По колёсам:\n${wheels}\n📝 ${lot.comment ?? '—'}`
+        );
+    }
+
+    @Action(/^sltype:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async storageLotType(@Ctx() ctx: BotContext) {
+        const type = String((ctx.callbackQuery as any).data).split(':')[1] as StorageLotType;
+        if (!Object.values(StorageLotType).includes(type)) return ctx.answerCbQuery();
+        const s = ensureSession(ctx);
+        if (s.flow !== 'storageLot') return ctx.answerCbQuery();
+        s.storageLotType = type;
+        s.step = 'storageLotQuantity';
+        await ctx.answerCbQuery();
+        await ctx.reply('Вкажіть кількість (наприклад, 4):');
     }
 
     // ---------- photo: start create flow ----------
@@ -956,6 +1032,100 @@ export class BotUpdate {
             }
         }
 
+        if (s.flow === 'storageLot') {
+            if (s.step === 'storageLotPhone') {
+                if (!isPhoneLike(text)) {
+                    await ctx.reply('Введите корректный номер телефона.');
+                    return;
+                }
+                s.phone = text;
+                await ctx.reply('Выберите, что оставляют на хранение:', {
+                    reply_markup: storageLotTypeKeyboard(),
+                });
+                return;
+            }
+            if (s.step === 'storageLotQuantity') {
+                const quantity = parseIntStrict(text);
+                if (quantity === null || quantity < 1 || quantity > 20) {
+                    await ctx.reply('Введите количество от 1 до 20.');
+                    return;
+                }
+                s.storageLotQuantity = quantity;
+                s.step = 'storageLotSize';
+                await ctx.reply('Укажите размер (например, 205/55 R16) или "-":');
+                return;
+            }
+            if (s.step === 'storageLotSize') {
+                s.storageLotSize = text === '-' ? undefined : text;
+                s.step = 'storageLotBrand';
+                await ctx.reply('Укажите бренд или "-":');
+                return;
+            }
+            if (s.step === 'storageLotBrand') {
+                s.storageLotBrand = text === '-' ? undefined : text;
+                s.storageLotWheelIndex = 1;
+                s.step = 'storageLotTread';
+                await ctx.reply('Колесо 1: укажите остаток протектора (мм) или "-":');
+                return;
+            }
+            if (s.step === 'storageLotTread' && s.storageLotWheelIndex) {
+                s.storageLotWheels ??= [];
+                s.storageLotWheels.push({
+                    position: s.storageLotWheelIndex,
+                    ...(text === '-' ? {} : { treadDepth: text }),
+                });
+                s.step = 'storageLotDefects';
+                await ctx.reply(`Колесо ${s.storageLotWheelIndex}: дефекты или "-":`);
+                return;
+            }
+            if (s.step === 'storageLotDefects' && s.storageLotWheelIndex) {
+                const wheel = s.storageLotWheels?.at(-1);
+                if (wheel && text !== '-') wheel.defects = text;
+                if (s.storageLotWheelIndex < (s.storageLotQuantity ?? 0)) {
+                    s.storageLotWheelIndex++;
+                    s.step = 'storageLotTread';
+                    await ctx.reply(`Колесо ${s.storageLotWheelIndex}: укажите остаток протектора (мм) или "-":`);
+                    return;
+                }
+                s.step = 'storageLotComment';
+                await ctx.reply('Общий комментарий к лоту или "-":');
+                return;
+            }
+            if (s.step === 'storageLotComment') {
+                s.storageLotComment = text === '-' ? undefined : text;
+                s.step = 'storageLotFee';
+                const fee = await this.orders.getStorageFeePerDay();
+                await ctx.reply(`Введите тариф в грн/день. Общий тариф: ${fee} грн/день (или "-" для него):`);
+                return;
+            }
+            if (s.step === 'storageLotFee') {
+                const fee = text === '-' ? await this.orders.getStorageFeePerDay() : parseIntStrict(text);
+                if (fee === null || fee < 0) {
+                    await ctx.reply('Введите целый тариф от 0 грн/день или "-".');
+                    return;
+                }
+                try {
+                    const lot = await this.storage.create({
+                        byTgId: tgId,
+                        clientPhone: s.phone!,
+                        type: s.storageLotType!,
+                        quantity: s.storageLotQuantity!,
+                        size: s.storageLotSize,
+                        brand: s.storageLotBrand,
+                        wheelDetails: s.storageLotWheels,
+                        comment: s.storageLotComment,
+                        feePerDay: fee,
+                        orderPublicId: s.storageOrderPublicId,
+                    });
+                    ctx.session = { ...DEFAULT_SESSION };
+                    await ctx.reply(`✅ Лот хранения #${lot.publicId} создан.\n📦 ${lot.quantity} шт. · ${lot.feePerDay} грн/день`);
+                } catch (e) {
+                    await ctx.reply('🚨 Не удалось создать лот хранения.');
+                }
+                return;
+            }
+        }
+
         if (s.flow === 'storageRate' && s.step === 'storageFee') {
             const role = await this.auth.getUserRole(tgId);
             const fee = parseIntStrict(text);
@@ -983,11 +1153,15 @@ export class BotUpdate {
                     status: OrderStatus.STORAGE,
                     storageFeePerDay: fee,
                 });
-                s.flow = null;
-                s.step = undefined;
-                s.storageOrderPublicId = undefined;
+                if (!updated) throw new Error('Замовлення не знайдено');
                 await ctx.reply(`✅ Індивідуальний тариф: ${fee} грн/день`);
-                await this.sendOrderCardForUser(ctx, updated, true);
+                s.flow = 'storageLot';
+                s.step = undefined;
+                s.phone = updated.clientPhone;
+                s.storageLotWheels = [];
+                await ctx.reply('Заполните данные комплекта для хранения:', {
+                    reply_markup: storageLotTypeKeyboard(),
+                });
             } catch (e) {
                 await ctx.reply('🚨 Не вдалося перевести замовлення на зберігання.');
             }

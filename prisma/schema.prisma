@@ -19,6 +19,17 @@ enum OrderStatus {
   DONE
 }
 
+enum StorageLotType {
+  TIRES
+  WHEELS
+  RIMS
+}
+
+enum StorageLotStatus {
+  ACTIVE
+  RELEASED
+}
+
 enum ServiceType {
   TIRE_MOUNTING
   STRAIGHTENING
@@ -44,6 +55,7 @@ model Employee {
   acceptedOrders Order[] @relation("AcceptedBy")
   createdOrders  Order[] @relation("CreatedBy")
   assignedOrders Order[] @relation("AssignedTo")
+  storageLots   StorageLot[]
 
   transfersFrom  OrderTransfer[] @relation("TransferFrom")
   transfersTo    OrderTransfer[] @relation("TransferTo")
@@ -84,10 +96,38 @@ model Order {
   items     OrderItem[]
   transfers OrderTransfer[]
   statusChanges OrderStatusChange[]
+  storageLot StorageLot?
 
   @@index([clientPhone])
   @@index([status, createdAt])
   @@index([assignedToId])
+}
+
+model StorageLot {
+  id              String           @id @default(cuid())
+  publicId        Int              @unique @default(autoincrement())
+  orderId         String?          @unique
+  status          StorageLotStatus @default(ACTIVE)
+  type            StorageLotType
+  clientPhone     String
+  quantity        Int
+  size            String?
+  brand           String?
+  wheelDetails    Json?
+  comment         String?
+  photoFileId     String?
+  feePerDay       Int
+  storedAt        DateTime         @default(now())
+  releasedAt      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  createdById     String
+
+  order     Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy Employee  @relation(fields: [createdById], references: [id])
+
+  @@index([status, storedAt])
+  @@index([clientPhone])
 }
 
 model StorageSettings {

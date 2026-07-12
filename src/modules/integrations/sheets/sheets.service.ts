@@ -8,6 +8,8 @@ import { OrderStatus, ServiceType } from '@prisma/client';
 
 const STAFF_SHEET_TITLE = 'Staff';
 const BACKUP_SHEET_TITLE = 'Backup';
+const STORAGE_BACKUP_SHEET_TITLE = 'StorageBackup';
+const STORAGE_SHEET_TITLE = 'Storage';
 const BACKUP_VERSION = 'v1';
 const BACKUP_HEADERS = [
     'backupVersion',
@@ -36,6 +38,11 @@ const BACKUP_HEADERS = [
     'itemsJson',
 ];
 const BACKUP_BATCH_SIZE = 500;
+const STORAGE_BACKUP_HEADERS = [
+    'backupAt', 'publicId', 'orderPublicId', 'status', 'clientPhone', 'type',
+    'quantity', 'size', 'brand', 'wheelDetailsJson', 'comment', 'photoFileId',
+    'feePerDay', 'storedAt', 'releasedAt', 'createdByName',
+];
 
 function parseBool(v: string | undefined): boolean {
     const s = String(v ?? '')
@@ -149,6 +156,86 @@ export class SheetsService {
         }
 
         return sheet;
+    }
+
+    private async ensureStorageBackupSheet() {
+        const doc = await this.getDoc();
+        let sheet = doc.sheetsByTitle[STORAGE_BACKUP_SHEET_TITLE];
+        if (!sheet) {
+            sheet = await doc.addSheet({
+                title: STORAGE_BACKUP_SHEET_TITLE,
+                headerValues: STORAGE_BACKUP_HEADERS,
+            });
+        } else {
+            await sheet.setHeaderRow(STORAGE_BACKUP_HEADERS);
+        }
+        await this.ensureStorageViewSheet(doc);
+        return sheet;
+    }
+
+    private async ensureStorageViewSheet(doc: GoogleSpreadsheet) {
+        let sheet = doc.sheetsByTitle[STORAGE_SHEET_TITLE];
+        if (!sheet) sheet = await doc.addSheet({ title: STORAGE_SHEET_TITLE });
+        await sheet.loadCells('A1:L2');
+        const headers = [
+            '№ лота', 'Дата хранения', 'Статус', 'Телефон', 'Тип', 'Кол-во',
+            'Размер', 'Бренд', 'Тариф/день', 'Дней', 'Начислено', 'Принял',
+        ];
+        headers.forEach((value, index) => {
+            sheet!.getCell(0, index).value = value;
+        });
+        sheet.getCell(1, 0).formula =
+            '=QUERY({StorageBackup!B:B\\StorageBackup!N:N\\StorageBackup!D:D\\StorageBackup!E:E\\StorageBackup!F:F\\StorageBackup!G:G\\StorageBackup!H:H\\StorageBackup!I:I\\StorageBackup!M:M\\ARRAYFORMULA(IF(LEN(StorageBackup!N:N)=0;"";TODAY()-DATEVALUE(LEFT(StorageBackup!N:N;10))))\\ARRAYFORMULA(IF(LEN(StorageBackup!N:N)=0;"";StorageBackup!M:M*(TODAY()-DATEVALUE(LEFT(StorageBackup!N:N;10))))\\StorageBackup!P:P}; "SELECT Col1, Col2, Col3, Col4, Col5, Col6, Col7, Col8, Col9, Col10, Col11, Col12 WHERE Col1 IS NOT NULL ORDER BY Col2 DESC"; 0)';
+        await sheet.saveUpdatedCells();
+    }
+
+    private toStorageBackupRow(lot: any, backupAt: string) {
+        return {
+            backupAt,
+            publicId: String(lot.publicId),
+            orderPublicId: lot.order?.publicId ? String(lot.order.publicId) : '',
+            status: lot.status,
+            clientPhone: lot.clientPhone,
+            type: lot.type,
+            quantity: String(lot.quantity),
+            size: lot.size ?? '',
+            brand: lot.brand ?? '',
+            wheelDetailsJson: lot.wheelDetails
+                ? JSON.stringify(lot.wheelDetails)
+                : '',
+            comment: lot.comment ?? '',
+            photoFileId: lot.photoFileId ?? '',
+            feePerDay: String(lot.feePerDay),
+            storedAt: new Date(lot.storedAt).toISOString(),
+            releasedAt: lot.releasedAt
+                ? new Date(lot.releasedAt).toISOString()
+                : '',
+            createdByName: lot.createdBy?.name ?? '',
+        };
+    }
+
+    async backupStorageLotByPublicId(publicId: number): Promise<boolean> {
+        const lot = await this.prisma.storageLot.findUnique({
+            where: { publicId },
+            include: {
+                createdBy: { select: { name: true } },
+                order: { select: { publicId: true } },
+            },
+        });
+        if (!lot) return false;
+        const sheet = await this.ensureStorageBackupSheet();
+        const data = this.toStorageBackupRow(lot, new Date().toISOString());
+        const rows = await sheet.getRows();
+        const existing = rows.find(
+            (row: any) => String(row.get('publicId') ?? '') === String(publicId)
+        );
+        if (existing) {
+            for (const [key, value] of Object.entries(data)) existing.set(key, value as any);
+            await existing.save();
+        } else {
+            await sheet.addRow(data as any);
+        }
+        return true;
     }
 
     private async clearSheetRows(sheet: any) {

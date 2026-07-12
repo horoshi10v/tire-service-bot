@@ -1,4 +1,5 @@
 import type { ServiceType } from '@prisma/client';
+import type { StorageLotType } from '@prisma/client';
 
 export type BotFlow =
     | 'create'
@@ -10,6 +11,7 @@ export type BotFlow =
     | 'storageRate'
     | 'storageOrderRate'
     | 'customPeriod'
+    | 'storageLot'
     | null;
 
 export type CreateStep =
@@ -40,6 +42,15 @@ export type EditStep =
 export type StorageRateStep = 'storageFee';
 export type StorageOrderRateStep = 'storageOrderFee';
 export type CustomPeriodStep = 'periodFrom' | 'periodTo';
+export type StorageLotStep =
+    | 'storageLotPhone'
+    | 'storageLotQuantity'
+    | 'storageLotSize'
+    | 'storageLotBrand'
+    | 'storageLotTread'
+    | 'storageLotDefects'
+    | 'storageLotComment'
+    | 'storageLotFee';
 
 export interface OrderDraftItem {
     service: ServiceType;
@@ -59,7 +70,8 @@ export interface BotSessionData {
         | EditStep
         | StorageRateStep
         | StorageOrderRateStep
-        | CustomPeriodStep;
+        | CustomPeriodStep
+        | StorageLotStep;
 
     // create order flow
     photoFileId?: string;
@@ -85,6 +97,14 @@ export interface BotSessionData {
     clientEmail?: string; // client email
     storageOrderPublicId?: number;
     customPeriodFrom?: Date;
+
+    storageLotType?: StorageLotType;
+    storageLotQuantity?: number;
+    storageLotSize?: string;
+    storageLotBrand?: string;
+    storageLotWheelIndex?: number;
+    storageLotWheels?: Array<{ position: number; treadDepth?: string; defects?: string }>;
+    storageLotComment?: string;
 
     // edit flow
     editPublicId?: number;

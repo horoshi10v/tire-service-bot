@@ -1,5 +1,6 @@
 import { InlineKeyboardMarkup, ReplyKeyboardMarkup } from 'telegraf/types';
 import { OrderStatus, ServiceType } from '@prisma/client';
+import { StorageLotType } from '@prisma/client';
 
 export const SERVICE_LABELS: Record<ServiceType, string> = {
     TIRE_MOUNTING: 'Шиномонтаж',
@@ -32,9 +33,43 @@ export function mainMenuKeyboard(): ReplyKeyboardMarkup {
             ['🟡 Прийняті', '🔵 В роботі'],
             ['🟢 Готові', '⚫ Видані'],
             ['📦 На зберіганні', '📊 Статистика'],
+            ['🗄 Лоти зберігання', '➕ Нове зберігання'],
             ['📌 Відкрити замовлення', '⚙️ Тариф зберігання'],
         ],
     };
+}
+
+export function storageLotTypeKeyboard(): InlineKeyboardMarkup {
+    const labels: Record<StorageLotType, string> = {
+        TIRES: 'Шини',
+        WHEELS: 'Колеса в зборі',
+        RIMS: 'Диски',
+    };
+    return {
+        inline_keyboard: (Object.values(StorageLotType) as StorageLotType[]).map(
+            (type) => [{ text: labels[type], callback_data: `sltype:${type}` }]
+        ),
+    };
+}
+
+export function storageLotsKeyboard(
+    lots: Array<{ publicId: number; type: StorageLotType; quantity: number; size: string | null; clientPhone: string }>,
+    page: number,
+    totalPages: number
+): InlineKeyboardMarkup {
+    const labels: Record<StorageLotType, string> = {
+        TIRES: 'Шины', WHEELS: 'Колёса', RIMS: 'Диски',
+    };
+    const rows: InlineKeyboardMarkup['inline_keyboard'] = lots.map((lot) => [{
+        text: `#${lot.publicId} | ${labels[lot.type]} | ${lot.quantity} шт. | ${lot.size ?? '—'} | ${lot.clientPhone}`,
+        callback_data: `slopen:${lot.publicId}`,
+    }]);
+    const navigation: InlineKeyboardMarkup['inline_keyboard'][number] = [];
+    if (page > 1) navigation.push({ text: '⬅ Поперед', callback_data: `slpage:${page - 1}` });
+    navigation.push({ text: `${page}/${totalPages}`, callback_data: 'noop:storagelots' });
+    if (page < totalPages) navigation.push({ text: 'Наст ➡', callback_data: `slpage:${page + 1}` });
+    rows.push(navigation);
+    return { inline_keyboard: rows };
 }
 
 export function storageRateKeyboard(): InlineKeyboardMarkup {

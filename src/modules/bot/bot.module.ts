@@ -6,9 +6,10 @@ import { OrdersModule } from '../orders/orders.module';
 import { WarrantyModule } from '../warranty/warranty.module';
 import { SheetsModule } from '../integrations/sheets/sheets.module';
 import { RolesGuard } from '../../common/guards';
+import { StorageModule } from '../storage';
 
 @Module({
-    imports: [AuthModule, OrdersModule, WarrantyModule, SheetsModule],
+    imports: [AuthModule, OrdersModule, WarrantyModule, SheetsModule, StorageModule],
     providers: [BotUpdate, WarrantyVerificationHandler, RolesGuard],
 })
 export class BotModule {}
