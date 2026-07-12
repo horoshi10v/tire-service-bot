@@ -18,6 +18,7 @@ import {
     mainMenuKeyboard,
     deleteConfirmKeyboard,
     storageRateKeyboard,
+    storageRateChoiceKeyboard,
     periodStatisticsKeyboard,
 } from './keyboards';
 import { EmployeeRole, OrderStatus, ServiceType } from '@prisma/client';
@@ -402,6 +403,41 @@ export class BotUpdate {
         await ctx.reply(`✅ Тариф зберігання: ${fee} грн/день`);
     }
 
+    @Action(/^storagechoice:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async chooseStorageRate(@Ctx() ctx: BotContext) {
+        const [, publicIdStr, choice] = String(
+            (ctx.callbackQuery as any).data
+        ).split(':');
+        const publicId = Number(publicIdStr);
+        if (!publicId) return ctx.answerCbQuery();
+
+        if (choice === 'custom') {
+            const s = ensureSession(ctx);
+            s.flow = 'storageOrderRate';
+            s.step = 'storageOrderFee';
+            s.storageOrderPublicId = publicId;
+            await ctx.answerCbQuery();
+            await ctx.reply(
+                `Введіть індивідуальний тариф для замовлення #${publicId} у грн/день:`
+            );
+            return;
+        }
+
+        try {
+            const updated = await this.orders.changeStatus({
+                orderPublicId: publicId,
+                byTgId: BigInt(ctx.from!.id),
+                status: OrderStatus.STORAGE,
+            });
+            await ctx.answerCbQuery('Збережено');
+            await this.sendOrderCardForUser(ctx, updated, true);
+        } catch (e) {
+            await ctx.answerCbQuery();
+            await ctx.reply('🚨 Не вдалося перевести замовлення на зберігання.');
+        }
+    }
+
     @Hears('📊 Статистика')
     @Roles(UserRole.MASTER, UserRole.ADMIN)
     async summary(@Ctx() ctx: BotContext) {
@@ -731,6 +767,18 @@ export class BotUpdate {
                 return;
             }
 
+            if (status === OrderStatus.STORAGE) {
+                const fee = await this.orders.getStorageFeePerDay();
+                await ctx.answerCbQuery();
+                await ctx.reply(
+                    `📦 Загальний тариф зберігання: ${fee} грн/день.\nОберіть тариф для замовлення #${publicId}:`,
+                    {
+                        reply_markup: storageRateChoiceKeyboard(publicId, fee),
+                    }
+                );
+                return;
+            }
+
             const updated = await this.orders.changeStatus({
                 orderPublicId: publicId,
                 byTgId: BigInt(ctx.from!.id),
@@ -860,6 +908,30 @@ export class BotUpdate {
             s.flow = null;
             s.step = undefined;
             await ctx.reply(`✅ Тариф зберігання: ${fee} грн/день`);
+            return;
+        }
+
+        if (s.flow === 'storageOrderRate' && s.step === 'storageOrderFee') {
+            const fee = parseIntStrict(text);
+            if (fee === null || fee < 0 || !s.storageOrderPublicId) {
+                await ctx.reply('Введіть цілий тариф від 0 грн/день');
+                return;
+            }
+            try {
+                const updated = await this.orders.changeStatus({
+                    orderPublicId: s.storageOrderPublicId,
+                    byTgId: tgId,
+                    status: OrderStatus.STORAGE,
+                    storageFeePerDay: fee,
+                });
+                s.flow = null;
+                s.step = undefined;
+                s.storageOrderPublicId = undefined;
+                await ctx.reply(`✅ Індивідуальний тариф: ${fee} грн/день`);
+                await this.sendOrderCardForUser(ctx, updated, true);
+            } catch (e) {
+                await ctx.reply('🚨 Не вдалося перевести замовлення на зберігання.');
+            }
             return;
         }
 

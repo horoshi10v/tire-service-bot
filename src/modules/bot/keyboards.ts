@@ -50,6 +50,28 @@ export function storageRateKeyboard(): InlineKeyboardMarkup {
     };
 }
 
+export function storageRateChoiceKeyboard(
+    publicId: number,
+    feePerDay: number
+): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [
+            [
+                {
+                    text: `✅ Загальний тариф: ${feePerDay} грн/день`,
+                    callback_data: `storagechoice:${publicId}:default`,
+                },
+            ],
+            [
+                {
+                    text: '✏️ Вказати індивідуальний тариф',
+                    callback_data: `storagechoice:${publicId}:custom`,
+                },
+            ],
+        ],
+    };
+}
+
 export function periodStatisticsKeyboard(): InlineKeyboardMarkup {
     return {
         inline_keyboard: [[

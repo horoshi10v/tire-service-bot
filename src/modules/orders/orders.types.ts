@@ -30,6 +30,7 @@ export type ChangeStatusInput = {
     orderPublicId: number;
     byTgId: bigint;
     status: OrderStatus;
+    storageFeePerDay?: number;
 };
 
 export type FinalizeOrderInput = {

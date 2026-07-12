@@ -462,8 +462,15 @@ export class OrdersService {
 
         const storageFeePerDay =
             input.status === OrderStatus.STORAGE
-                ? await this.getStorageFeePerDay()
+                ? (input.storageFeePerDay ??
+                  (await this.getStorageFeePerDay()))
                 : null;
+        if (
+            storageFeePerDay !== null &&
+            (!Number.isInteger(storageFeePerDay) || storageFeePerDay < 0)
+        ) {
+            throw new ValidationException('Тариф має бути цілим числом від 0');
+        }
 
         if (order.assignedToId !== by.id) {
             await this.repository.transferAndUpdateStatus({
