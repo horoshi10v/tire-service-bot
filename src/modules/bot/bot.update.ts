@@ -106,11 +106,11 @@ export class BotUpdate {
         to?: Date
     ) {
         const stats = await this.orders.getPeriodStatistics(from, to);
-        const byEmployee = stats.issuedBy.length
-            ? `\n\n👥 По сотрудникам:\n${stats.issuedBy
+        const byEmployee = stats.byEmployee.length
+            ? `\n\n👥 По сотрудникам:\n${stats.byEmployee
                   .map(
                       (row) =>
-                          `• ${row.name}: ${row.count} выд. · ${row.total} грн`
+                          `• ${row.name}: готово ${row.completed} · выдал ${row.issued} · ${row.total} грн`
                   )
                   .join('\n')}`
             : '';

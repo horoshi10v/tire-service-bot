@@ -719,24 +719,49 @@ export class OrdersService {
                 finalTotal: true,
                 assignedToId: true,
                 statusChanges: {
-                    where: { status: OrderStatus.DONE },
-                    select: { changedById: true },
+                    where: {
+                        status: { in: [OrderStatus.READY, OrderStatus.DONE] },
+                    },
+                    select: { changedById: true, status: true },
                 },
             },
         });
-        const revenueByEmployee = new Map<string, { count: number; total: number }>();
+        const byEmployee = new Map<
+            string,
+            { completed: number; issued: number; total: number }
+        >();
         for (const order of orders) {
-            const issuerId =
-                order.statusChanges[0]?.changedById ?? order.assignedToId;
-            if (!issuerId) continue;
-            const current = revenueByEmployee.get(issuerId) ?? { count: 0, total: 0 };
-            current.count++;
-            current.total += order.finalTotal ?? 0;
-            revenueByEmployee.set(issuerId, current);
+            const completedById =
+                order.statusChanges.find(
+                    (change) => change.status === OrderStatus.READY
+                )?.changedById ?? order.assignedToId;
+            const issuedById =
+                order.statusChanges.find(
+                    (change) => change.status === OrderStatus.DONE
+                )?.changedById ?? order.assignedToId;
+            if (completedById) {
+                const current = byEmployee.get(completedById) ?? {
+                    completed: 0,
+                    issued: 0,
+                    total: 0,
+                };
+                current.completed++;
+                current.total += order.finalTotal ?? 0;
+                byEmployee.set(completedById, current);
+            }
+            if (issuedById) {
+                const current = byEmployee.get(issuedById) ?? {
+                    completed: 0,
+                    issued: 0,
+                    total: 0,
+                };
+                current.issued++;
+                byEmployee.set(issuedById, current);
+            }
         }
-        const employees = revenueByEmployee.size
+        const employees = byEmployee.size
             ? await this.prisma.employee.findMany({
-                  where: { id: { in: [...revenueByEmployee.keys()] } },
+                  where: { id: { in: [...byEmployee.keys()] } },
                   select: { id: true, name: true },
               })
             : [];
@@ -746,9 +771,10 @@ export class OrdersService {
             count: orders.length,
             total,
             average: orders.length ? Math.round(total / orders.length) : 0,
-            issuedBy: [...revenueByEmployee.entries()].map(([id, value]) => ({
+            byEmployee: [...byEmployee.entries()].map(([id, value]) => ({
                 name: names.get(id) ?? 'Без імені',
-                count: value.count,
+                completed: value.completed,
+                issued: value.issued,
                 total: value.total,
             })),
         };
@@ -770,7 +796,7 @@ export class OrdersService {
                     finalTotal: true,
                     assignedToId: true,
                     statusChanges: {
-                        where: { status: OrderStatus.DONE },
+                        where: { status: OrderStatus.READY },
                         select: { changedById: true },
                     },
                 },
@@ -781,9 +807,9 @@ export class OrdersService {
             ...accepted.map((row) => row.acceptedById),
             ...statusChanges.map((row) => row.changedById),
             ...completedOrders.flatMap((order) => {
-                const issuerId =
+                const completedById =
                     order.statusChanges[0]?.changedById ?? order.assignedToId;
-                return issuerId ? [issuerId] : [];
+                return completedById ? [completedById] : [];
             }),
         ]);
         const employees = await this.prisma.employee.findMany({
@@ -805,12 +831,13 @@ export class OrdersService {
         const changesByEmployee = new Map<string, Record<OrderStatus, number>>();
         const revenueByEmployee = new Map<string, number>();
         for (const order of completedOrders) {
-            const issuerId =
+            const completedById =
                 order.statusChanges[0]?.changedById ?? order.assignedToId;
-            if (issuerId) {
+            if (completedById) {
                 revenueByEmployee.set(
-                    issuerId,
-                    (revenueByEmployee.get(issuerId) ?? 0) + (order.finalTotal ?? 0)
+                    completedById,
+                    (revenueByEmployee.get(completedById) ?? 0) +
+                        (order.finalTotal ?? 0)
                 );
             }
         }
