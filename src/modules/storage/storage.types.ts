@@ -15,7 +15,7 @@ export type CreateStorageLotInput = {
     brand?: string | null;
     wheelDetails?: StorageWheelDetail[];
     comment?: string | null;
-    photoFileId?: string | null;
+    photoFileIds?: string[];
     feePerDay: number;
     orderPublicId?: number;
 };

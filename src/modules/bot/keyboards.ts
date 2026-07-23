@@ -96,6 +96,17 @@ export function storageLotsKeyboard(
     return { inline_keyboard: rows };
 }
 
+export function storageLotCardKeyboard(publicId: number): InlineKeyboardMarkup {
+    return {
+        inline_keyboard: [
+            [
+                { text: '✅ Выдать лот', callback_data: `slrelease:${publicId}` },
+                { text: '📷 Добавить фото', callback_data: `slphoto:${publicId}` },
+            ],
+        ],
+    };
+}
+
 export function storageRateKeyboard(): InlineKeyboardMarkup {
     return {
         inline_keyboard: [

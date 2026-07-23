@@ -12,6 +12,7 @@ export type BotFlow =
     | 'storageOrderRate'
     | 'customPeriod'
     | 'storageLot'
+    | 'storageLotPhoto'
     | null;
 
 export type CreateStep =
@@ -51,6 +52,7 @@ export type StorageLotStep =
     | 'storageLotDefects'
     | 'storageLotComment'
     | 'storageLotFee';
+export type StorageLotPhotoStep = 'storageLotPhoto';
 
 export interface OrderDraftItem {
     service: ServiceType;
@@ -71,7 +73,8 @@ export interface BotSessionData {
         | StorageRateStep
         | StorageOrderRateStep
         | CustomPeriodStep
-        | StorageLotStep;
+        | StorageLotStep
+        | StorageLotPhotoStep;
 
     // create order flow
     photoFileId?: string;
@@ -105,6 +108,7 @@ export interface BotSessionData {
     storageLotWheelIndex?: number;
     storageLotWheels?: Array<{ position: number; treadDepth?: string; defects?: string }>;
     storageLotComment?: string;
+    storageLotPublicId?: number;
 
     // edit flow
     editPublicId?: number;

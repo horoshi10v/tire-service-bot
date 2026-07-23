@@ -23,6 +23,7 @@ import {
     storageLotTypeKeyboard,
     storageLotsKeyboard,
     storageMenuKeyboard,
+    storageLotCardKeyboard,
 } from './keyboards';
 import { EmployeeRole, OrderStatus, ServiceType } from '@prisma/client';
 import {
@@ -136,6 +137,50 @@ export class BotUpdate {
         await ctx.reply(`🗄 Лоты хранения: ${result.total}`, {
             reply_markup: storageLotsKeyboard(result.items, page, totalPages),
         });
+    }
+
+    private async sendStorageLotCard(ctx: BotContext, lot: any) {
+        const days = Math.max(
+            0,
+            Math.floor((Date.now() - new Date(lot.storedAt).getTime()) / 86_400_000)
+        );
+        const wheels = Array.isArray(lot.wheelDetails)
+            ? lot.wheelDetails
+                  .map(
+                      (wheel: any) =>
+                          `• Колесо ${wheel.position}: протектор ${wheel.treadDepth ?? '—'}; дефекты: ${wheel.defects ?? '—'}`
+                  )
+                  .join('\n')
+            : '—';
+        const text =
+            `🗄 Лот #${lot.publicId}\n📞 ${lot.clientPhone}\n` +
+            `📦 ${lot.type}: ${lot.quantity} шт.\n` +
+            `📐 ${lot.size ?? '—'} · ${lot.brand ?? '—'}\n` +
+            `📅 Хранение: ${days} дн.\n` +
+            `💰 ${lot.feePerDay} грн/день · ${days * lot.feePerDay} грн\n` +
+            `🛞 По колёсам:\n${wheels}\n📝 ${lot.comment ?? '—'}`;
+        const keyboard = lot.status === 'ACTIVE'
+            ? storageLotCardKeyboard(lot.publicId)
+            : undefined;
+        const photos = Array.isArray(lot.photos) ? lot.photos : [];
+        if (photos.length > 1) {
+            await ctx.replyWithMediaGroup(
+                photos.map((photo: any) => ({ type: 'photo', media: photo.fileId }))
+            );
+            await ctx.reply(text, { reply_markup: keyboard });
+        } else if (photos.length === 1) {
+            await ctx.replyWithPhoto(photos[0].fileId, {
+                caption: text,
+                reply_markup: keyboard,
+            });
+        } else if (lot.photoFileId) {
+            await ctx.replyWithPhoto(lot.photoFileId, {
+                caption: text,
+                reply_markup: keyboard,
+            });
+        } else {
+            await ctx.reply(text, { reply_markup: keyboard });
+        }
     }
 
     // ---------- start ----------
@@ -477,6 +522,8 @@ export class BotUpdate {
             s.phone = updated.clientPhone;
             s.storageOrderPublicId = publicId;
             s.storageLotWheels = [];
+            s.photoFileId = undefined;
+            s.photoFileIds = [];
             await ctx.reply('Заполните данные комплекта для хранения:', {
                 reply_markup: storageLotTypeKeyboard(),
             });
@@ -551,6 +598,8 @@ export class BotUpdate {
         s.flow = 'storageLot';
         s.step = 'storageLotPhone';
         s.storageLotWheels = [];
+        s.photoFileId = undefined;
+        s.photoFileIds = [];
         await ctx.reply('Введіть номер телефону клієнта:');
     }
 
@@ -585,13 +634,36 @@ export class BotUpdate {
         const lot = await this.storage.getByPublicId(publicId);
         await ctx.answerCbQuery();
         if (!lot) return ctx.reply('Лот хранения не найден.');
+        await this.sendStorageLotCard(ctx, lot);
+    }
+
+    @Action(/^slrelease:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async releaseStorageLot(@Ctx() ctx: BotContext) {
+        const publicId = Number(String((ctx.callbackQuery as any).data).split(':')[1]);
+        const lot = await this.storage.getByPublicId(publicId);
+        if (!lot) return ctx.answerCbQuery('Лот не найден');
         const days = Math.max(0, Math.floor((Date.now() - new Date(lot.storedAt).getTime()) / 86_400_000));
-        const wheels = Array.isArray(lot.wheelDetails)
-            ? lot.wheelDetails.map((wheel: any) => `• Колесо ${wheel.position}: протектор ${wheel.treadDepth ?? '—'}; дефекты: ${wheel.defects ?? '—'}`).join('\n')
-            : '—';
-        await ctx.reply(
-            `🗄 Лот #${lot.publicId}\n📞 ${lot.clientPhone}\n📦 ${lot.type}: ${lot.quantity} шт.\n📐 ${lot.size ?? '—'} · ${lot.brand ?? '—'}\n📅 Хранение: ${days} дн.\n💰 ${lot.feePerDay} грн/день · ${days * lot.feePerDay} грн\n🛞 По колёсам:\n${wheels}\n📝 ${lot.comment ?? '—'}`
-        );
+        try {
+            await this.storage.release(publicId, BigInt(ctx.from!.id));
+            await ctx.answerCbQuery('Лот выдан');
+            await ctx.reply(`✅ Лот #${publicId} выдан.\n📦 Хранение: ${days} дн.\n💰 К оплате за хранение: ${days * lot.feePerDay} грн`);
+        } catch {
+            await ctx.answerCbQuery();
+            await ctx.reply('🚨 Не удалось выдать лот.');
+        }
+    }
+
+    @Action(/^slphoto:/)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    async addStorageLotPhoto(@Ctx() ctx: BotContext) {
+        const publicId = Number(String((ctx.callbackQuery as any).data).split(':')[1]);
+        const s = ensureSession(ctx);
+        s.flow = 'storageLotPhoto';
+        s.step = 'storageLotPhoto';
+        s.storageLotPublicId = publicId;
+        await ctx.answerCbQuery();
+        await ctx.reply('Отправьте фото комплекта.');
     }
 
     @Action(/^sltype:/)
@@ -624,6 +696,34 @@ export class BotUpdate {
             withStatus: true,
         });
         if (handled) return;
+
+        if (ctx.session.flow === 'storageLotPhoto' && ctx.session.storageLotPublicId) {
+            try {
+                const lot = await this.storage.addPhoto(
+                    ctx.session.storageLotPublicId,
+                    BigInt(ctx.from!.id),
+                    fileId
+                );
+                ctx.session = { ...DEFAULT_SESSION };
+                await ctx.reply('✅ Фото добавлено.');
+                await this.sendStorageLotCard(ctx, lot);
+            } catch {
+                await ctx.reply('🚨 Не удалось добавить фото.');
+            }
+            return;
+        }
+
+        if (ctx.session.flow === 'storageLot') {
+            ctx.session.photoFileIds ??= [];
+            if (!ctx.session.photoFileIds.includes(fileId)) {
+                ctx.session.photoFileIds.push(fileId);
+            }
+            ctx.session.photoFileId = ctx.session.photoFileIds[0];
+            await ctx.reply(
+                `✅ Фото комплекта добавлено (${ctx.session.photoFileIds.length}). Продолжайте заполнение.`
+            );
+            return;
+        }
 
         // If order creation already started, just append photo
         if (ctx.session.flow === 'create' && ctx.session.step === 'phone') {
@@ -1123,11 +1223,13 @@ export class BotUpdate {
                         brand: s.storageLotBrand,
                         wheelDetails: s.storageLotWheels,
                         comment: s.storageLotComment,
+                        photoFileIds: s.photoFileIds ?? [],
                         feePerDay: fee,
                         orderPublicId: s.storageOrderPublicId,
                     });
                     ctx.session = { ...DEFAULT_SESSION };
-                    await ctx.reply(`✅ Лот хранения #${lot.publicId} создан.\n📦 ${lot.quantity} шт. · ${lot.feePerDay} грн/день`);
+                    await ctx.reply(`✅ Лот хранения #${lot.publicId} создан.`);
+                    await this.sendStorageLotCard(ctx, lot);
                 } catch (e) {
                     await ctx.reply('🚨 Не удалось создать лот хранения.');
                 }
@@ -1168,6 +1270,8 @@ export class BotUpdate {
                 s.step = undefined;
                 s.phone = updated.clientPhone;
                 s.storageLotWheels = [];
+                s.photoFileId = undefined;
+                s.photoFileIds = [];
                 await ctx.reply('Заполните данные комплекта для хранения:', {
                     reply_markup: storageLotTypeKeyboard(),
                 });

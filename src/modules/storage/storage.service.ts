@@ -56,12 +56,21 @@ export class StorageService {
                     ? (input.wheelDetails as any)
                     : undefined,
                 comment: input.comment?.trim() || null,
-                photoFileId: input.photoFileId ?? null,
+                photoFileId: input.photoFileIds?.[0] ?? null,
+                ...(input.photoFileIds?.length
+                    ? {
+                          photos: {
+                              create: input.photoFileIds.map((fileId) => ({
+                                  fileId,
+                              })),
+                          },
+                      }
+                    : {}),
                 feePerDay: input.feePerDay,
                 createdById,
                 ...(orderId ? { orderId } : {}),
             },
-            include: { createdBy: { select: { name: true } } },
+            include: { createdBy: { select: { name: true } }, photos: true },
         });
         await this.sheets.backupStorageLotByPublicId(lot.publicId);
         return lot;
@@ -83,6 +92,44 @@ export class StorageService {
     }
 
     async getByPublicId(publicId: number) {
-        return this.prisma.storageLot.findUnique({ where: { publicId } });
+        return this.prisma.storageLot.findUnique({
+            where: { publicId },
+            include: { photos: true },
+        });
+    }
+
+    async release(publicId: number, byTgId: bigint) {
+        await this.getEmployeeId(byTgId);
+        const lot = await this.prisma.storageLot.findUnique({
+            where: { publicId },
+        });
+        if (!lot || lot.status !== StorageLotStatus.ACTIVE) {
+            throw new Error('Лот недоступний для видачі');
+        }
+        const updated = await this.prisma.storageLot.update({
+            where: { publicId },
+            data: { status: StorageLotStatus.RELEASED, releasedAt: new Date() },
+        });
+        await this.sheets.backupStorageLotByPublicId(publicId);
+        return updated;
+    }
+
+    async addPhoto(publicId: number, byTgId: bigint, photoFileId: string) {
+        await this.getEmployeeId(byTgId);
+        const existing = await this.prisma.storageLot.findUnique({
+            where: { publicId },
+            select: { id: true, photoFileId: true },
+        });
+        if (!existing) throw new Error('Лот не знайдено');
+        const lot = await this.prisma.storageLot.update({
+            where: { publicId },
+            data: {
+                photoFileId: existing.photoFileId ?? photoFileId,
+                photos: { create: { fileId: photoFileId } },
+            },
+            include: { photos: true },
+        });
+        await this.sheets.backupStorageLotByPublicId(publicId);
+        return lot;
     }
 }

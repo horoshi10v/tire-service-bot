@@ -36,12 +36,13 @@ const BACKUP_HEADERS = [
     'storageStartedAt',
     'doneAt',
     'itemsJson',
+    'storageFeePerDay',
 ];
 const BACKUP_BATCH_SIZE = 500;
 const STORAGE_BACKUP_HEADERS = [
     'backupAt', 'publicId', 'orderPublicId', 'status', 'clientPhone', 'type',
     'quantity', 'size', 'brand', 'wheelDetailsJson', 'comment', 'photoFileId',
-    'feePerDay', 'storedAt', 'releasedAt', 'createdByName',
+    'feePerDay', 'storedAt', 'releasedAt', 'createdByName', 'photoFileIdsJson',
 ];
 
 function parseBool(v: string | undefined): boolean {
@@ -185,7 +186,7 @@ export class SheetsService {
             sheet!.getCell(0, index).value = value;
         });
         sheet.getCell(1, 0).formula =
-            '=QUERY({StorageBackup!B:B\\StorageBackup!N:N\\StorageBackup!D:D\\StorageBackup!E:E\\StorageBackup!F:F\\StorageBackup!G:G\\StorageBackup!H:H\\StorageBackup!I:I\\StorageBackup!M:M\\ARRAYFORMULA(IF(LEN(StorageBackup!N:N)=0;"";TODAY()-DATEVALUE(LEFT(StorageBackup!N:N;10))))\\ARRAYFORMULA(IF(LEN(StorageBackup!N:N)=0;"";StorageBackup!M:M*(TODAY()-DATEVALUE(LEFT(StorageBackup!N:N;10))))\\StorageBackup!P:P}; "SELECT Col1, Col2, Col3, Col4, Col5, Col6, Col7, Col8, Col9, Col10, Col11, Col12 WHERE Col1 IS NOT NULL ORDER BY Col2 DESC"; 0)';
+            '=QUERY({FILTER({"Заказ #"&Backup!C2:C\\Backup!V2:V\\"Заказ"\\Backup!E2:E\\"Шиномонтаж"\\""\\""\\""\\Backup!Y2:Y\\ARRAYFORMULA(IF(LEN(Backup!V2:V)=0;"";TODAY()-DATEVALUE(LEFT(Backup!V2:V;10))))\\ARRAYFORMULA(IF(LEN(Backup!V2:V)=0;"";Backup!Y2:Y*(TODAY()-DATEVALUE(LEFT(Backup!V2:V;10))))\\Backup!O2:O};Backup!D2:D="STORAGE");{StorageBackup!B2:B\\StorageBackup!N2:N\\"Лот"\\StorageBackup!E2:E\\StorageBackup!F2:F\\StorageBackup!G2:G\\StorageBackup!H2:H\\StorageBackup!I2:I\\StorageBackup!M2:M\\ARRAYFORMULA(IF(LEN(StorageBackup!N2:N)=0;"";TODAY()-DATEVALUE(LEFT(StorageBackup!N2:N;10))))\\ARRAYFORMULA(IF(LEN(StorageBackup!N2:N)=0;"";StorageBackup!M2:M*(TODAY()-DATEVALUE(LEFT(StorageBackup!N2:N;10))))\\StorageBackup!P2:P}};"SELECT Col1, Col2, Col3, Col4, Col5, Col6, Col7, Col8, Col9, Col10, Col11, Col12 WHERE Col1 IS NOT NULL ORDER BY Col2 DESC";0)';
         await sheet.saveUpdatedCells();
     }
 
@@ -205,6 +206,9 @@ export class SheetsService {
                 : '',
             comment: lot.comment ?? '',
             photoFileId: lot.photoFileId ?? '',
+            photoFileIdsJson: JSON.stringify(
+                (lot.photos ?? []).map((photo: any) => photo.fileId)
+            ),
             feePerDay: String(lot.feePerDay),
             storedAt: new Date(lot.storedAt).toISOString(),
             releasedAt: lot.releasedAt
@@ -220,6 +224,7 @@ export class SheetsService {
             include: {
                 createdBy: { select: { name: true } },
                 order: { select: { publicId: true } },
+                photos: true,
             },
         });
         if (!lot) return false;
@@ -318,6 +323,11 @@ export class SheetsService {
                 : '',
             doneAt: order.doneAt ? new Date(order.doneAt).toISOString() : '',
             itemsJson,
+            storageFeePerDay:
+                order.storageFeePerDay === null ||
+                order.storageFeePerDay === undefined
+                    ? ''
+                    : String(order.storageFeePerDay),
         };
     }
 
@@ -654,6 +664,7 @@ export class SheetsService {
                 parseDate(row.get('createdAt')) ?? new Date();
             const doneAt = parseDate(row.get('doneAt'));
             const storageStartedAt = parseDate(row.get('storageStartedAt'));
+            const storageFeePerDay = parseNumber(row.get('storageFeePerDay'));
 
             await this.prisma.order.upsert({
                 where: { publicId: Math.trunc(publicId) },
@@ -670,6 +681,10 @@ export class SheetsService {
                         : String(row.get('photoFileId') ?? '').trim() || null,
                     createdAt,
                     storageStartedAt,
+                    storageFeePerDay:
+                        storageFeePerDay === null
+                            ? null
+                            : Math.trunc(storageFeePerDay),
                     doneAt,
                     acceptedBy: { connect: { id: acceptedById } },
                     createdBy: { connect: { id: createdById } },
@@ -715,6 +730,10 @@ export class SheetsService {
                         : String(row.get('photoFileId') ?? '').trim() || null,
                     doneAt,
                     storageStartedAt,
+                    storageFeePerDay:
+                        storageFeePerDay === null
+                            ? null
+                            : Math.trunc(storageFeePerDay),
                     acceptedBy: { connect: { id: acceptedById } },
                     createdBy: { connect: { id: createdById } },
                     ...(assignedToId

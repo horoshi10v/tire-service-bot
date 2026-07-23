@@ -116,6 +116,7 @@ model StorageLot {
   wheelDetails    Json?
   comment         String?
   photoFileId     String?
+  photos          StorageLotPhoto[]
   feePerDay       Int
   storedAt        DateTime         @default(now())
   releasedAt      DateTime?
@@ -128,6 +129,17 @@ model StorageLot {
 
   @@index([status, storedAt])
   @@index([clientPhone])
+}
+
+model StorageLotPhoto {
+  id        String   @id @default(cuid())
+  storageLotId String
+  fileId    String
+  createdAt DateTime @default(now())
+
+  storageLot StorageLot @relation(fields: [storageLotId], references: [id], onDelete: Cascade)
+
+  @@index([storageLotId])
 }
 
 model StorageSettings {
