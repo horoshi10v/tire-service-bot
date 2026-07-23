@@ -9,7 +9,6 @@ import { OrderStatus, ServiceType } from '@prisma/client';
 const STAFF_SHEET_TITLE = 'Staff';
 const BACKUP_SHEET_TITLE = 'Backup';
 const STORAGE_BACKUP_SHEET_TITLE = 'StorageBackup';
-const STORAGE_SHEET_TITLE = 'Storage';
 const BACKUP_VERSION = 'v1';
 const BACKUP_HEADERS = [
     'backupVersion',
@@ -170,24 +169,7 @@ export class SheetsService {
         } else {
             await sheet.setHeaderRow(STORAGE_BACKUP_HEADERS);
         }
-        await this.ensureStorageViewSheet(doc);
         return sheet;
-    }
-
-    private async ensureStorageViewSheet(doc: GoogleSpreadsheet) {
-        let sheet = doc.sheetsByTitle[STORAGE_SHEET_TITLE];
-        if (!sheet) sheet = await doc.addSheet({ title: STORAGE_SHEET_TITLE });
-        await sheet.loadCells('A1:L2');
-        const headers = [
-            '№ лота', 'Дата хранения', 'Статус', 'Телефон', 'Тип', 'Кол-во',
-            'Размер', 'Бренд', 'Тариф/день', 'Дней', 'Начислено', 'Принял',
-        ];
-        headers.forEach((value, index) => {
-            sheet!.getCell(0, index).value = value;
-        });
-        sheet.getCell(1, 0).formula =
-            '=QUERY({FILTER({"Заказ #"&Backup!C2:C\\Backup!V2:V\\"Заказ"\\Backup!E2:E\\"Шиномонтаж"\\""\\""\\""\\Backup!Y2:Y\\ARRAYFORMULA(IF(LEN(Backup!V2:V)=0;"";TODAY()-DATEVALUE(LEFT(Backup!V2:V;10))))\\ARRAYFORMULA(IF(LEN(Backup!V2:V)=0;"";Backup!Y2:Y*(TODAY()-DATEVALUE(LEFT(Backup!V2:V;10))))\\Backup!O2:O};Backup!D2:D="STORAGE");{StorageBackup!B2:B\\StorageBackup!N2:N\\"Лот"\\StorageBackup!E2:E\\StorageBackup!F2:F\\StorageBackup!G2:G\\StorageBackup!H2:H\\StorageBackup!I2:I\\StorageBackup!M2:M\\ARRAYFORMULA(IF(LEN(StorageBackup!N2:N)=0;"";TODAY()-DATEVALUE(LEFT(StorageBackup!N2:N;10))))\\ARRAYFORMULA(IF(LEN(StorageBackup!N2:N)=0;"";StorageBackup!M2:M*(TODAY()-DATEVALUE(LEFT(StorageBackup!N2:N;10))))\\StorageBackup!P2:P}};"SELECT Col1, Col2, Col3, Col4, Col5, Col6, Col7, Col8, Col9, Col10, Col11, Col12 WHERE Col1 IS NOT NULL ORDER BY Col2 DESC";0)';
-        await sheet.saveUpdatedCells();
     }
 
     private toStorageBackupRow(lot: any, backupAt: string) {
